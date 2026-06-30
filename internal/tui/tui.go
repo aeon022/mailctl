@@ -50,11 +50,11 @@ var (
 			Bold(true).
 			Foreground(lipgloss.Color("15")).
 			Background(colorBlue).
-			Padding(0, 2)
+			Padding(0, 3)
 	styleTabInact = lipgloss.NewStyle().
 			Foreground(lipgloss.AdaptiveColor{Light: "237", Dark: "252"}).
 			Background(colorTabBg).
-			Padding(0, 2)
+			Padding(0, 3)
 
 	// list
 	styleDivider   = lipgloss.NewStyle().Foreground(colorSubtle)
@@ -480,7 +480,7 @@ func (m Model) renderList() string {
 				parts = append(parts, styleTabInact.Render(a))
 			}
 		}
-		bar := strings.Join(parts, " ")
+		bar := strings.Join(parts, "  ")
 		if m.syncing {
 			bar += "  " + styleSyncing.Render("⟳ syncing…")
 		}
