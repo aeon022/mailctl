@@ -427,17 +427,26 @@ func (m Model) View() string {
 }
 
 func (m Model) renderList() string {
+	w := min(m.width, 130)
 	var b strings.Builder
 
-	// ── tab bar ──
+	// ── app header ──
+	appName := styleHeader.Render("mailctl")
+	dateStr := styleMeta.Render(time.Now().Format("Mon, 02 Jan 2006"))
+	pad := w - lipgloss.Width(appName) - lipgloss.Width(dateStr)
+	if pad < 1 {
+		pad = 1
+	}
+	b.WriteString(appName + strings.Repeat(" ", pad) + dateStr + "\n")
+
+	// ── account tab bar ──
 	if len(m.accounts) > 0 {
 		var parts []string
 		for i, a := range m.accounts {
-			label := a
 			if i == m.activeTab {
-				parts = append(parts, styleTabActive.Render(label))
+				parts = append(parts, styleTabActive.Render(a))
 			} else {
-				parts = append(parts, styleTabInact.Render(label))
+				parts = append(parts, styleTabInact.Render(a))
 			}
 		}
 		bar := strings.Join(parts, "")
@@ -445,17 +454,16 @@ func (m Model) renderList() string {
 			bar += "  " + styleSyncing.Render("⟳ syncing…")
 		}
 		b.WriteString(bar + "\n")
+	} else if m.syncing {
+		b.WriteString(styleSyncing.Render("⟳ syncing…") + "\n")
 	} else {
-		title := "mailctl"
-		if m.syncing {
-			title += "  " + styleSyncing.Render("⟳")
-		}
-		b.WriteString(styleHeader.Render(title) + "\n")
+		b.WriteString("\n")
 	}
-	b.WriteString(styleDivider.Render(strings.Repeat("─", m.width)) + "\n")
+	b.WriteString(styleDivider.Render(strings.Repeat("─", w)) + "\n")
 
 	// ── filter chips ──
-	overhead := 3 // tab bar + divider + status bar
+	// overhead: header(1) + tab(1) + divider(1) + statusbar(2) = 5
+	overhead := 5
 	if m.unreadOnly || m.searchQ != "" {
 		var chips []string
 		if m.unreadOnly {
@@ -488,13 +496,13 @@ func (m Model) renderList() string {
 			start = m.cursor - listH + 1
 		}
 		end := min(len(m.msgs), start+listH)
-		showAcct := m.activeTab == 0 // show account badge in Alle tab
+		showAcct := m.activeTab == 0
 		for i := start; i < end; i++ {
 			row := &m.msgs[i]
-			line := formatListRow(row, m.width, showAcct)
+			line := formatListRow(row, w, showAcct)
 			switch {
 			case i == m.cursor:
-				line = styleSelected.Width(m.width).Render(line)
+				line = styleSelected.Width(w).Render(line)
 			case !row.Read:
 				line = styleUnread.Render(line)
 			default:
@@ -509,20 +517,20 @@ func (m Model) renderList() string {
 	if len(m.msgs) > 0 {
 		countStr = styleHelp.Render(fmt.Sprintf(" %d msgs", len(m.msgs)))
 	}
-	var bar string
+	var helpBar string
 	if m.err != nil {
-		bar = styleErr.Render("✗ " + m.err.Error())
+		helpBar = styleErr.Render("✗ " + m.err.Error())
 	} else if m.status != "" {
-		bar = styleOK.Render("✓ " + m.status)
+		helpBar = styleOK.Render("✓ " + m.status)
 	} else {
-		bar = styleHelp.Render("enter:open  n:new  s:sync  u:unread  /:search  tab:acct  q:quit")
+		helpBar = styleHelp.Render("enter:open  n:new  s:sync  u:unread  /:search  tab:acct  q:quit")
 	}
-	// right-align count
-	pad := m.width - lipgloss.Width(bar) - lipgloss.Width(countStr)
-	if pad < 0 {
-		pad = 0
+	rightPad := w - lipgloss.Width(helpBar) - lipgloss.Width(countStr)
+	if rightPad < 0 {
+		rightPad = 0
 	}
-	b.WriteString("\n" + bar + strings.Repeat(" ", pad) + countStr)
+	b.WriteString(styleDivider.Render(strings.Repeat("─", w)) + "\n")
+	b.WriteString(helpBar + strings.Repeat(" ", rightPad) + countStr)
 	return b.String()
 }
 
@@ -530,9 +538,10 @@ func (m Model) renderDetail() string {
 	if m.detail == nil {
 		return ""
 	}
+	w := min(m.width, 130)
 	var b strings.Builder
 
-	// header block
+	// ── header ──
 	b.WriteString(styleSubject.Render(m.detail.Subject) + "\n")
 	b.WriteString(styleLabel.Render("From:") + " " + m.detail.From + "\n")
 	if len(m.detail.To) > 0 {
@@ -542,19 +551,54 @@ func (m Model) renderDetail() string {
 	if m.detail.Account != "" {
 		b.WriteString(styleLabel.Render("Account:") + " " + styleMeta.Render(m.detail.Account) + "\n")
 	}
-	b.WriteString(styleDivider.Render(strings.Repeat("─", m.width)) + "\n")
+	b.WriteString(styleDivider.Render(strings.Repeat("─", w)) + "\n")
 
-	// body viewport (height recalculated from current window)
+	// ── body viewport with scrollbar ──
+	m.vp.Width = w - 2 // leave 2 cols for scrollbar track
 	m.vp.Height = m.detailBodyHeight()
-	b.WriteString(m.vp.View())
+	b.WriteString(renderScrollbar(m.vp))
 
-	// scroll hint
-	pct := ""
-	if m.vp.TotalLineCount() > m.vp.Height {
-		pct = fmt.Sprintf(" %d%%", int(m.vp.ScrollPercent()*100))
-	}
-	b.WriteString("\n" + styleHelp.Render("esc:back  r:reply  ↑↓/jk:scroll  q:quit") + styleMeta.Render(pct))
+	// ── footer ──
+	b.WriteString("\n" + styleDivider.Render(strings.Repeat("─", w)) + "\n")
+	b.WriteString(styleHelp.Render("esc:back  r:reply  ↑↓/jk:scroll  q:quit"))
 	return b.String()
+}
+
+// renderScrollbar renders viewport content with a sidebar scrollbar track.
+func renderScrollbar(vp viewport.Model) string {
+	content := vp.View()
+	lines := strings.Split(content, "\n")
+	h := vp.Height
+	if h <= 0 {
+		h = len(lines)
+	}
+	total := vp.TotalLineCount()
+
+	// no scrollbar needed if content fits
+	if total <= h {
+		var sb strings.Builder
+		for _, l := range lines {
+			sb.WriteString(l + "\n")
+		}
+		return strings.TrimRight(sb.String(), "\n")
+	}
+
+	// compute thumb size and position
+	thumbH := max(1, h*h/total)
+	thumbTop := int(vp.ScrollPercent() * float64(h-thumbH))
+
+	track := styleDivider.Render("│")
+	thumb := styleMeta.Render("█")
+
+	var sb strings.Builder
+	for i, l := range lines {
+		glyph := track
+		if i >= thumbTop && i < thumbTop+thumbH {
+			glyph = thumb
+		}
+		sb.WriteString(l + " " + glyph + "\n")
+	}
+	return strings.TrimRight(sb.String(), "\n")
 }
 
 func (m Model) renderCompose() string {
@@ -562,9 +606,10 @@ func (m Model) renderCompose() string {
 	if m.replyTo != nil {
 		title = "Reply"
 	}
+	w := min(m.width, 130)
 	var b strings.Builder
-	b.WriteString(styleHeader.Render(title) + "\n")
-	b.WriteString(styleDivider.Render(strings.Repeat("─", m.width)) + "\n\n")
+	b.WriteString(styleHeader.Render("mailctl") + "  " + styleMeta.Render(title) + "\n")
+	b.WriteString(styleDivider.Render(strings.Repeat("─", w)) + "\n\n")
 
 	focused := func(i int) string {
 		if m.composeFocus == i {
@@ -712,8 +757,8 @@ func (m *Model) setStatus(s string) {
 
 // detailBodyHeight calculates how many lines the viewport can use.
 func (m Model) detailBodyHeight() int {
-	// subject + from + to + date + account + divider = up to 6 lines
-	// status bar = 1 line
+	// subject(1) + from(1) + to(1) + date(1) + account(1) + divider(1)
+	// + footer-divider(1) + help(1) = 8
 	h := m.height - 8
 	if h < 5 {
 		h = 5
@@ -772,13 +817,13 @@ func formatDetail(msg *models.Message, width int) string {
 	if body == "" {
 		return styleMeta.Render("(no body)")
 	}
-	// soft-wrap long lines
+	w := min(width-2, 128) // leave room for scrollbar track
 	var lines []string
 	for _, l := range strings.Split(body, "\n") {
-		if len(l) > width {
-			for len(l) > width {
-				lines = append(lines, l[:width])
-				l = l[width:]
+		if len(l) > w {
+			for len(l) > w {
+				lines = append(lines, l[:w])
+				l = l[w:]
 			}
 		}
 		lines = append(lines, l)
@@ -807,13 +852,13 @@ func smartDate(t time.Time) string {
 	now := time.Now()
 	switch {
 	case sameDay(t, now):
-		return t.Format("        15:04") // today: just time, right-aligned
+		return "Today   " + t.Format("15:04")
 	case t.After(now.AddDate(0, 0, -6)):
-		return t.Format("Mon     15:04") // this week: weekday + time
+		return t.Format("Mon     15:04")
 	case t.Year() == now.Year():
-		return t.Format("Jan 02  15:04") // this year: month day + time
+		return t.Format("Jan 02  15:04")
 	default:
-		return t.Format("Jan 02   2006") // older: month day year
+		return t.Format("Jan 02   2006")
 	}
 }
 
