@@ -78,7 +78,8 @@ func formatAddressList(addrs []string) string {
 	return strings.Join(lines, "\n\t\t")
 }
 
-// FetchInbox returns recent messages from all accounts' inboxes.
+// FetchInbox returns recent message headers from all accounts' inboxes.
+// Body is NOT fetched here — use FetchMessageBody for on-demand loading.
 func FetchInbox(count int, unreadOnly bool) ([]models.Message, error) {
 	unreadFilter := ""
 	if unreadOnly {
@@ -100,11 +101,6 @@ tell application "Mail"
 				set mDate to date received of m
 				set mRead to read status of m
 				set mID to message id of m
-				set mBody to ""
-				try
-					set mBody to content of m
-					if length of mBody > 2000 then set mBody to text 1 thru 2000 of mBody
-				end try
 				set readStr to "0"
 				if mRead then set readStr to "1"
 				set output to output & "ID:" & mID & linefeed
@@ -113,7 +109,7 @@ tell application "Mail"
 				set output to output & "DATE:" & ((mDate as string)) & linefeed
 				set output to output & "READ:" & readStr & linefeed
 				set output to output & "ACCOUNT:" & (name of a) & linefeed
-				set output to output & "BODY:" & mBody & linefeed
+				set output to output & "BODY:" & linefeed
 				set output to output & "---MSG---" & linefeed
 			end repeat
 		end try
@@ -126,6 +122,29 @@ end tell
 		return nil, err
 	}
 	return parseMessages(out, "INBOX"), nil
+}
+
+// FetchMessageBody fetches the full body of a single message by subject+sender.
+func FetchMessageBody(subject, from string) (string, error) {
+	script := fmt.Sprintf(`
+tell application "Mail"
+	repeat with a in accounts
+		repeat with mbox in mailboxes of a
+			try
+				set msgs to (messages of mbox whose subject is "%s")
+				repeat with m in msgs
+					if sender of m is "%s" then
+						set mBody to content of m
+						return mBody
+					end if
+				end repeat
+			end try
+		end repeat
+	end repeat
+	return ""
+end tell
+`, escapeAS(subject), escapeAS(from))
+	return runAppleScript(script)
 }
 
 // SearchMessages searches all accounts for messages matching a query.

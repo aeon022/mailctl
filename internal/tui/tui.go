@@ -52,6 +52,10 @@ type syncDoneMsg struct {
 type sentMsg struct{ err error }
 type draftedMsg struct{ err error }
 type errMsg struct{ err error }
+type bodyLoadedMsg struct {
+	body string
+	err  error
+}
 
 // ── Form fields ───────────────────────────────────────────────────────────────
 
@@ -144,6 +148,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setStatus(fmt.Sprintf("Synced %d messages", len(msg.msgs)))
 		}
 
+	case bodyLoadedMsg:
+		if msg.err != nil {
+			m.err = msg.err
+		} else if m.detail != nil {
+			m.detail.Body = msg.body
+			m.vp.SetContent(formatDetail(m.detail))
+		}
+
 	case sentMsg:
 		if msg.err != nil {
 			m.err = msg.err
@@ -228,9 +240,10 @@ func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if len(m.msgs) > 0 {
 			msg := m.msgs[m.cursor]
 			m.detail = &msg
-			m.vp.SetContent(formatDetail(&msg))
+			m.vp.SetContent("Loading…")
 			m.vp.GotoTop()
 			m.view = viewDetail
+			return m, loadBodyCmd(&msg)
 		}
 	case "n":
 		m.replyTo = nil
@@ -265,7 +278,7 @@ func (m Model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "r":
 		if m.detail != nil {
 			m.replyTo = m.detail
-			m.resetCompose(m.detail.From)
+			m.resetCompose(extractEmail(m.detail.From))
 			m.view = viewCompose
 		}
 	}
@@ -470,6 +483,15 @@ func sendCmd(inputs [fCount]textinput.Model) tea.Cmd {
 	}
 }
 
+func loadBodyCmd(msg *models.Message) tea.Cmd {
+	subject := msg.Subject
+	from := msg.From
+	return func() tea.Msg {
+		body, err := mail.FetchMessageBody(subject, from)
+		return bodyLoadedMsg{body: body, err: err}
+	}
+}
+
 func draftCmd(inputs [fCount]textinput.Model) tea.Cmd {
 	to := inputs[fTo].Value()
 	subject := inputs[fSubject].Value()
@@ -535,6 +557,16 @@ func formatListRow(msg *models.Message, width int) string {
 
 func formatDetail(msg *models.Message) string {
 	return strings.TrimSpace(msg.Body)
+}
+
+// extractEmail pulls "addr@host" from "Name <addr@host>" or returns as-is.
+func extractEmail(s string) string {
+	if start := strings.Index(s, "<"); start >= 0 {
+		if end := strings.Index(s, ">"); end > start {
+			return s[start+1 : end]
+		}
+	}
+	return strings.TrimSpace(s)
 }
 
 func max(a, b int) int {
