@@ -127,6 +127,11 @@ func (s *Store) ListAccounts(ctx context.Context) ([]string, error) {
 	return accounts, rows.Err()
 }
 
+func (s *Store) MarkRead(ctx context.Context, id string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE messages SET read=1 WHERE id=?`, id)
+	return err
+}
+
 func (s *Store) DeleteBySource(ctx context.Context, source string) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM messages WHERE source=?`, source)
 	return err
