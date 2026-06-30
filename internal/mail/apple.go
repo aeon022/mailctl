@@ -89,7 +89,9 @@ tell application "Mail"
 	set output to ""
 	repeat with a in accounts
 		try
-			set mbox to mailbox "INBOX" of a
+			-- 'inbox of a' works for all account types (iCloud, Exchange, Gmail)
+			-- regardless of localized mailbox name ("INBOX", "Posteingang", etc.)
+			set mbox to inbox of a
 			set msgs to (messages of mbox %s)
 			set msgCount to count of msgs
 			if msgCount > %d then set msgCount to %d
@@ -102,7 +104,6 @@ tell application "Mail"
 				set mID to message id of m
 				set readStr to "0"
 				if mRead then set readStr to "1"
-				-- format date as locale-independent ISO string
 				set yr to year of mDate as string
 				set mo to text -2 thru -1 of ("0" & ((month of mDate as integer) as string))
 				set dy to text -2 thru -1 of ("0" & (day of mDate as string))
@@ -132,25 +133,44 @@ end tell
 }
 
 // FetchMessageBody fetches the full body of a single message by subject+sender.
+// Checks inbox of each account first (fast), then falls back to all mailboxes.
 func FetchMessageBody(subject, from string) (string, error) {
 	script := fmt.Sprintf(`
 tell application "Mail"
+	-- check inbox of each account first (fastest path)
+	repeat with a in accounts
+		try
+			set mbox to inbox of a
+			set msgs to (messages of mbox whose subject is "%s")
+			repeat with m in msgs
+				try
+					if sender of m contains "%s" then
+						set mBody to content of m
+						return mBody
+					end if
+				end try
+			end repeat
+		end try
+	end repeat
+	-- fall back to all mailboxes (sent, archive, etc.)
 	repeat with a in accounts
 		repeat with mbox in mailboxes of a
 			try
 				set msgs to (messages of mbox whose subject is "%s")
 				repeat with m in msgs
-					if sender of m is "%s" then
-						set mBody to content of m
-						return mBody
-					end if
+					try
+						if sender of m contains "%s" then
+							set mBody to content of m
+							return mBody
+						end if
+					end try
 				end repeat
 			end try
 		end repeat
 	end repeat
 	return ""
 end tell
-`, escapeAS(subject), escapeAS(from))
+`, escapeAS(subject), escapeAS(from), escapeAS(subject), escapeAS(from))
 	return runAppleScript(script)
 }
 
