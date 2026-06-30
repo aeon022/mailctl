@@ -310,6 +310,27 @@ end tell`
 	return accounts, nil
 }
 
+// OpenInMail activates Apple Mail and opens the message with the given message-id.
+func OpenInMail(messageID string) error {
+	script := fmt.Sprintf(`
+tell application "Mail"
+	activate
+	repeat with a in accounts
+		repeat with mbox in mailboxes of a
+			try
+				set found to (messages of mbox whose message id is %q)
+				if (count of found) > 0 then
+					open item 1 of found
+					return
+				end if
+			end try
+		end repeat
+	end repeat
+end tell`, messageID)
+	_, err := runAppleScript(script)
+	return err
+}
+
 // ── Parsing ───────────────────────────────────────────────────────────────────
 
 func parseMessages(raw, defaultMailbox string) []models.Message {

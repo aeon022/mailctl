@@ -132,6 +132,29 @@ func (s *Store) MarkRead(ctx context.Context, id string) error {
 	return err
 }
 
+// UnreadCounts returns unread message counts per account plus "" for the total.
+func (s *Store) UnreadCounts(ctx context.Context) (map[string]int, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT account, COUNT(*) FROM messages WHERE read=0 GROUP BY account`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	counts := map[string]int{}
+	total := 0
+	for rows.Next() {
+		var acct string
+		var n int
+		if err := rows.Scan(&acct, &n); err != nil {
+			return nil, err
+		}
+		counts[acct] = n
+		total += n
+	}
+	counts[""] = total // "" = Alle
+	return counts, rows.Err()
+}
+
 func (s *Store) DeleteBySource(ctx context.Context, source string) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM messages WHERE source=?`, source)
 	return err

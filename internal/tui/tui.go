@@ -103,8 +103,9 @@ func senderStyle(from string) lipgloss.Style {
 // ── Messages ──────────────────────────────────────────────────────────────────
 
 type msgsLoadedMsg struct {
-	msgs     []models.Message
-	accounts []string
+	msgs         []models.Message
+	accounts     []string
+	unreadCounts map[string]int
 }
 type syncDoneMsg struct {
 	count    int
@@ -119,6 +120,7 @@ type bodyLoadedMsg struct {
 	err  error
 }
 type readMarkedMsg struct{}
+type openedMsg struct{}
 
 // ── Model ─────────────────────────────────────────────────────────────────────
 
@@ -136,8 +138,9 @@ type Model struct {
 	searchInput textinput.Model
 
 	// tabs
-	accounts  []string // ["Alle", "iCloud", ...]
-	activeTab int      // 0 = Alle
+	accounts     []string     // ["Alle", "iCloud", ...]
+	activeTab    int          // 0 = Alle
+	unreadCounts map[string]int
 
 	// detail
 	detail *models.Message
@@ -223,6 +226,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.cursor >= len(m.msgs) {
 			m.cursor = max(0, len(m.msgs)-1)
+		}
+		if msg.unreadCounts != nil {
+			m.unreadCounts = msg.unreadCounts
 		}
 
 	case syncDoneMsg:
@@ -353,6 +359,10 @@ func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.view = viewDetail
 			return m, tea.Batch(loadBodyCmd(&msg), markReadCmd(msg.ID))
 		}
+	case "o":
+		if len(m.msgs) > 0 {
+			return m, openInMailCmd(m.msgs[m.cursor].ID)
+		}
 	case "n":
 		m.replyTo = nil
 		m.resetCompose("", "")
@@ -388,6 +398,10 @@ func (m Model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.view = viewList
 		m.detail = nil
 		return m, nil
+	case "o":
+		if m.detail != nil {
+			return m, openInMailCmd(m.detail.ID)
+		}
 	case "r":
 		if m.detail != nil {
 			m.replyTo = m.detail
@@ -474,10 +488,18 @@ func (m Model) renderList() string {
 	if len(m.accounts) > 0 {
 		var parts []string
 		for i, a := range m.accounts {
+			acctKey := a
+			if i == 0 {
+				acctKey = "" // "Alle" maps to "" in unreadCounts
+			}
+			label := a
+			if c := m.unreadCounts[acctKey]; c > 0 {
+				label = fmt.Sprintf("%s ·%d", a, c)
+			}
 			if i == m.activeTab {
-				parts = append(parts, styleTabActive.Render(a))
+				parts = append(parts, styleTabActive.Render(label))
 			} else {
-				parts = append(parts, styleTabInact.Render(a))
+				parts = append(parts, styleTabInact.Render(label))
 			}
 		}
 		bar := strings.Join(parts, "  ")
@@ -522,24 +544,14 @@ func (m Model) renderList() string {
 	if len(m.msgs) == 0 {
 		b.WriteString("\n" + styleHelp.Render("  No messages — press s to sync") + "\n")
 	} else {
+		lines, cursorLine := m.buildListLines(w)
 		start := 0
-		if m.cursor >= listH {
-			start = m.cursor - listH + 1
+		if cursorLine >= listH {
+			start = cursorLine - listH + 1
 		}
-		end := min(len(m.msgs), start+listH)
-		showAcct := m.activeTab == 0
-		for i := start; i < end; i++ {
-			row := &m.msgs[i]
-			line := formatListRow(row, w, showAcct)
-			switch {
-			case i == m.cursor:
-				line = styleSelected.Width(w).Render(line)
-			case !row.Read:
-				line = styleUnread.Render(line)
-			default:
-				line = styleRead.Render(line)
-			}
-			b.WriteString(line + "\n")
+		end := min(len(lines), start+listH)
+		for _, l := range lines[start:end] {
+			b.WriteString(l + "\n")
 		}
 	}
 
@@ -554,7 +566,7 @@ func (m Model) renderList() string {
 	} else if m.status != "" {
 		helpBar = styleOK.Render("✓ " + m.status)
 	} else {
-		helpBar = styleHelp.Render("enter:open  n:new  s:sync  u:unread  /:search  tab:acct  q:quit")
+		helpBar = styleHelp.Render("enter:open  n:new  s:sync  u:unread  o:mail  /:search  tab:acct  q:quit")
 	}
 	rightPad := w - lipgloss.Width(helpBar) - lipgloss.Width(countStr)
 	if rightPad < 0 {
@@ -591,7 +603,7 @@ func (m Model) renderDetail() string {
 
 	// ── footer ──
 	b.WriteString("\n" + styleDivider.Render(strings.Repeat("─", w)) + "\n")
-	b.WriteString(styleHelp.Render("esc:back  r:reply  ↑↓/jk:scroll  q:quit"))
+	b.WriteString(styleHelp.Render("esc:back  r:reply  o:mail  ↑↓/jk:scroll  q:quit"))
 	return b.String()
 }
 
@@ -682,7 +694,8 @@ func loadMsgsCmd(unreadOnly bool, query, account string) tea.Cmd {
 			return errMsg{err}
 		}
 		accounts, _ := s.ListAccounts(ctx)
-		return msgsLoadedMsg{msgs: msgs, accounts: accounts}
+		counts, _ := s.UnreadCounts(ctx)
+		return msgsLoadedMsg{msgs: msgs, accounts: accounts, unreadCounts: counts}
 	}
 }
 
@@ -747,6 +760,13 @@ func draftCmd(to, subject, body string) tea.Cmd {
 	}
 }
 
+func openInMailCmd(messageID string) tea.Cmd {
+	return func() tea.Msg {
+		_ = mail.OpenInMail(messageID)
+		return openedMsg{}
+	}
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 func (m *Model) resetCompose(to, subject string) {
@@ -795,6 +815,106 @@ func (m Model) detailBodyHeight() int {
 		h = 5
 	}
 	return h
+}
+
+// buildListLines pre-renders all message rows (with date group headers and body
+// previews) and returns them as a flat string slice plus the visual index of cursor.
+func (m Model) buildListLines(w int) ([]string, int) {
+	showAcct := m.activeTab == 0
+	var lines []string
+	cursorLine := 0
+	lastGroup := ""
+
+	for i := range m.msgs {
+		msg := &m.msgs[i]
+
+		// date group header
+		group := dateGroup(msg.Date)
+		if group != lastGroup {
+			lines = append(lines, renderGroupHeader(group, w))
+			lastGroup = group
+		}
+
+		if i == m.cursor {
+			cursorLine = len(lines)
+		}
+
+		// main row
+		row := formatListRow(msg, w, showAcct)
+		switch {
+		case i == m.cursor:
+			row = styleSelected.Width(w).Render(row)
+		case !msg.Read:
+			row = styleUnread.Render(row)
+		default:
+			row = styleRead.Render(row)
+		}
+		lines = append(lines, row)
+
+		// body preview (only when body is available)
+		if preview := formatPreview(msg, w, showAcct); preview != "" {
+			if i == m.cursor {
+				preview = styleSelected.Width(w).Render(preview)
+			} else {
+				preview = styleMeta.Render(preview)
+			}
+			lines = append(lines, preview)
+		}
+	}
+	return lines, cursorLine
+}
+
+func dateGroup(t time.Time) string {
+	now := time.Now()
+	switch {
+	case sameDay(t, now):
+		return "Today"
+	case sameDay(t, now.AddDate(0, 0, -1)):
+		return "Yesterday"
+	case t.After(now.AddDate(0, 0, -7)):
+		return t.Format("Monday")
+	case t.After(now.AddDate(0, 0, -14)):
+		return "Last week"
+	case t.Year() == now.Year():
+		return t.Format("January")
+	default:
+		return t.Format("January 2006")
+	}
+}
+
+func renderGroupHeader(group string, width int) string {
+	label := " " + group + " "
+	dashes := strings.Repeat("─", max(0, width-2-len(label)))
+	return styleDivider.Render("──" + label + dashes)
+}
+
+func formatPreview(msg *models.Message, width int, showAcct bool) string {
+	// find first non-empty, non-quoted body line
+	preview := ""
+	for _, line := range strings.Split(msg.Body, "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" && !strings.HasPrefix(line, ">") && line != "--" {
+			preview = line
+			break
+		}
+	}
+	if preview == "" {
+		return ""
+	}
+	// indent to align with subject column
+	indent := 1 + 2 + 14 + 2 + 20 + 2 // dot + date + from
+	if showAcct {
+		indent += 12 // badge + spaces
+	}
+	avail := width - indent
+	if avail < 10 {
+		return ""
+	}
+	runes := []rune(preview)
+	if len(runes) > avail {
+		preview = string(runes[:avail-1]) + "…"
+	}
+	return strings.Repeat(" ", indent) + preview
 }
 
 func formatListRow(msg *models.Message, width int, showAcct bool) string {
