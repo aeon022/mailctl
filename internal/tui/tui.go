@@ -824,13 +824,16 @@ func formatListRow(msg *models.Message, width int, showAcct bool) string {
 	fromPadded := fmt.Sprintf("%-20s", from)
 	fromStyled := senderStyle(msg.From).Render(fromPadded)
 
-	// ── account badge (only in Alle tab) ──
+	// ── account badge (only in Alle tab, always 12 chars wide: [xxxxxxxx]·· ) ──
+	const badgeInner = 8 // fixed visual width of text inside brackets
+	const badgeTotal = badgeInner + 2 + 2 // "[" + inner + "]" + "  "
 	acctBadge := ""
 	acctW := 0
 	if showAcct && msg.Account != "" {
-		badge := "[" + acctShort(msg.Account) + "]"
-		acctBadge = styleAcctBadge.Render(badge) + "  "
-		acctW = len(badge) + 2
+		inner := runeLimit(acctShort(msg.Account), badgeInner)
+		inner = inner + strings.Repeat(" ", badgeInner-lipgloss.Width(inner)) // pad to 8
+		acctBadge = styleAcctBadge.Render("["+inner+"]") + "  "
+		acctW = badgeTotal
 	}
 
 	// ── subject: fill remaining width ──
@@ -907,17 +910,26 @@ func sameDay(a, b time.Time) bool {
 // acctShort returns a short label for an account name.
 func acctShort(name string) string {
 	words := strings.Fields(name)
-	if len(words) == 0 {
-		return name
+	var short string
+	switch {
+	case len(words) == 0:
+		short = name
+	case len(words) == 1:
+		short = name
+	default:
+		// "Gerwin @ Brücke" → "Brücke", "FH Burgenland" → "Burgenland"
+		short = words[len(words)-1]
 	}
-	if len(words) == 1 {
-		if len(name) > 8 {
-			return name[:8]
-		}
-		return name
+	return runeLimit(short, 8)
+}
+
+// runeLimit truncates s to at most n visible characters (rune-aware).
+func runeLimit(s string, n int) string {
+	runes := []rune(s)
+	if len(runes) <= n {
+		return s
 	}
-	// "Gerwin @ Brücke" → "Brücke"
-	return words[len(words)-1]
+	return string(runes[:n])
 }
 
 // extractEmail pulls "addr@host" from "Name <addr@host>" or returns as-is.
