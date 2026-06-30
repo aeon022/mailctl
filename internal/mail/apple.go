@@ -87,40 +87,52 @@ func FetchInbox(count int, unreadOnly bool) ([]models.Message, error) {
 	script := fmt.Sprintf(`
 tell application "Mail"
 	set output to ""
+	-- inbox names vary by account type: "INBOX" for IMAP, "Posteingang" for Exchange
+	set inboxNames to {"INBOX", "Posteingang", "Inbox"}
 	repeat with a in accounts
+		set mbox to missing value
 		try
-			-- 'inbox of a' works for all account types (iCloud, Exchange, Gmail)
-			-- regardless of localized mailbox name ("INBOX", "Posteingang", etc.)
-			set mbox to inbox of a
-			set msgs to (messages of mbox %s)
-			set msgCount to count of msgs
-			if msgCount > %d then set msgCount to %d
-			repeat with i from 1 to msgCount
-				set m to item i of msgs
-				set mSubject to subject of m
-				set mFrom to sender of m
-				set mDate to date received of m
-				set mRead to read status of m
-				set mID to message id of m
-				set readStr to "0"
-				if mRead then set readStr to "1"
-				set yr to year of mDate as string
-				set mo to text -2 thru -1 of ("0" & ((month of mDate as integer) as string))
-				set dy to text -2 thru -1 of ("0" & (day of mDate as string))
-				set hr to text -2 thru -1 of ("0" & (hours of mDate as string))
-				set mn to text -2 thru -1 of ("0" & (minutes of mDate as string))
-				set sc to text -2 thru -1 of ("0" & (seconds of mDate as string))
-				set mDateStr to yr & "-" & mo & "-" & dy & "T" & hr & ":" & mn & ":" & sc
-				set output to output & "ID:" & mID & linefeed
-				set output to output & "SUBJECT:" & mSubject & linefeed
-				set output to output & "FROM:" & mFrom & linefeed
-				set output to output & "DATE:" & mDateStr & linefeed
-				set output to output & "READ:" & readStr & linefeed
-				set output to output & "ACCOUNT:" & (name of a) & linefeed
-				set output to output & "BODY:" & linefeed
-				set output to output & "---MSG---" & linefeed
+			repeat with mb in mailboxes of a
+				if (name of mb) is in inboxNames then
+					set mbox to mb
+					exit repeat
+				end if
 			end repeat
 		end try
+		if mbox is missing value then
+			-- skip accounts where no inbox-named mailbox was found
+		else
+			try
+				set msgs to (messages of mbox %s)
+				set msgCount to count of msgs
+				if msgCount > %d then set msgCount to %d
+				repeat with i from 1 to msgCount
+					set m to item i of msgs
+					set mSubject to subject of m
+					set mFrom to sender of m
+					set mDate to date received of m
+					set mRead to read status of m
+					set mID to message id of m
+					set readStr to "0"
+					if mRead then set readStr to "1"
+					set yr to year of mDate as string
+					set mo to text -2 thru -1 of ("0" & ((month of mDate as integer) as string))
+					set dy to text -2 thru -1 of ("0" & (day of mDate as string))
+					set hr to text -2 thru -1 of ("0" & (hours of mDate as string))
+					set mn to text -2 thru -1 of ("0" & (minutes of mDate as string))
+					set sc to text -2 thru -1 of ("0" & (seconds of mDate as string))
+					set mDateStr to yr & "-" & mo & "-" & dy & "T" & hr & ":" & mn & ":" & sc
+					set output to output & "ID:" & mID & linefeed
+					set output to output & "SUBJECT:" & mSubject & linefeed
+					set output to output & "FROM:" & mFrom & linefeed
+					set output to output & "DATE:" & mDateStr & linefeed
+					set output to output & "READ:" & readStr & linefeed
+					set output to output & "ACCOUNT:" & (name of a) & linefeed
+					set output to output & "BODY:" & linefeed
+					set output to output & "---MSG---" & linefeed
+				end repeat
+			end try
+		end if
 	end repeat
 	return output
 end tell
@@ -133,22 +145,28 @@ end tell
 }
 
 // FetchMessageBody fetches the full body of a single message by subject+sender.
-// Checks inbox of each account first (fast), then falls back to all mailboxes.
+// Searches inbox mailboxes first ("INBOX"/"Posteingang"), then all mailboxes.
 func FetchMessageBody(subject, from string) (string, error) {
 	script := fmt.Sprintf(`
 tell application "Mail"
+	set inboxNames to {"INBOX", "Posteingang", "Inbox"}
 	-- check inbox of each account first (fastest path)
 	repeat with a in accounts
 		try
-			set mbox to inbox of a
-			set msgs to (messages of mbox whose subject is "%s")
-			repeat with m in msgs
-				try
-					if sender of m contains "%s" then
-						set mBody to content of m
-						return mBody
-					end if
-				end try
+			repeat with mb in mailboxes of a
+				if (name of mb) is in inboxNames then
+					try
+						set msgs to (messages of mb whose subject is "%s")
+						repeat with m in msgs
+							try
+								if sender of m contains "%s" then
+									return content of m
+								end if
+							end try
+						end repeat
+					end try
+					exit repeat
+				end if
 			end repeat
 		end try
 	end repeat
@@ -160,8 +178,7 @@ tell application "Mail"
 				repeat with m in msgs
 					try
 						if sender of m contains "%s" then
-							set mBody to content of m
-							return mBody
+							return content of m
 						end if
 					end try
 				end repeat
