@@ -109,6 +109,24 @@ func (s *Store) ListMessages(ctx context.Context, f Filter) ([]models.Message, e
 	return scanMessages(rows)
 }
 
+func (s *Store) ListAccounts(ctx context.Context) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT DISTINCT account FROM messages WHERE account != '' ORDER BY account`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var accounts []string
+	for rows.Next() {
+		var a string
+		if err := rows.Scan(&a); err != nil {
+			return nil, err
+		}
+		accounts = append(accounts, a)
+	}
+	return accounts, rows.Err()
+}
+
 func (s *Store) DeleteBySource(ctx context.Context, source string) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM messages WHERE source=?`, source)
 	return err

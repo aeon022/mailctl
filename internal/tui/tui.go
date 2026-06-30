@@ -29,25 +29,31 @@ const (
 // ── Styles ────────────────────────────────────────────────────────────────────
 
 var (
-	styleHeader   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12"))
-	styleUnread   = lipgloss.NewStyle().Bold(true)
-	styleRead     = lipgloss.NewStyle().Faint(true)
-	styleCursor   = lipgloss.NewStyle().Background(lipgloss.Color("237")).Width(0)
-	styleSubject  = lipgloss.NewStyle().Bold(true)
-	styleMeta     = lipgloss.NewStyle().Faint(true)
-	styleLabel    = lipgloss.NewStyle().Foreground(lipgloss.Color("12")).Width(10)
-	styleHelp     = lipgloss.NewStyle().Faint(true)
-	styleErr      = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
-	styleSelected = lipgloss.NewStyle().Background(lipgloss.Color("235"))
-	styleSent     = lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
+	styleHeader    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12"))
+	styleUnread    = lipgloss.NewStyle().Bold(true)
+	styleRead      = lipgloss.NewStyle().Faint(true)
+	styleCursor    = lipgloss.NewStyle().Background(lipgloss.Color("237")).Width(0)
+	styleSubject   = lipgloss.NewStyle().Bold(true)
+	styleMeta      = lipgloss.NewStyle().Faint(true)
+	styleLabel     = lipgloss.NewStyle().Foreground(lipgloss.Color("12")).Width(10)
+	styleHelp      = lipgloss.NewStyle().Faint(true)
+	styleErr       = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
+	styleSelected  = lipgloss.NewStyle().Background(lipgloss.Color("235"))
+	styleSent      = lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
+	styleTabActive = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("15")).Background(lipgloss.Color("12")).Padding(0, 1)
+	styleTabInact  = lipgloss.NewStyle().Faint(true).Padding(0, 1)
 )
 
 // ── Messages ──────────────────────────────────────────────────────────────────
 
-type msgsLoadedMsg struct{ msgs []models.Message }
+type msgsLoadedMsg struct {
+	msgs     []models.Message
+	accounts []string
+}
 type syncDoneMsg struct {
-	msgs []models.Message
-	err  error
+	msgs     []models.Message
+	accounts []string
+	err      error
 }
 type sentMsg struct{ err error }
 type draftedMsg struct{ err error }
@@ -69,24 +75,26 @@ const (
 // ── Model ─────────────────────────────────────────────────────────────────────
 
 type Model struct {
-	view       view
-	msgs       []models.Message
-	cursor     int
-	detail     *models.Message
-	vp         viewport.Model
-	width      int
-	height     int
-	unreadOnly bool
-	searchQ    string
-	searching  bool
-	searchInput textinput.Model
+	view          view
+	msgs          []models.Message
+	cursor        int
+	detail        *models.Message
+	vp            viewport.Model
+	width         int
+	height        int
+	unreadOnly    bool
+	searchQ       string
+	searching     bool
+	searchInput   textinput.Model
 	composeInputs [fCount]textinput.Model
 	composeFocus  int
-	replyTo    *models.Message
-	status     string
-	statusTime time.Time
-	err        error
-	syncing    bool
+	replyTo       *models.Message
+	status        string
+	statusTime    time.Time
+	err           error
+	syncing       bool
+	accounts      []string // ["Alle", "Account1", ...]
+	activeTab     int      // 0 = Alle, 1+ = account index
 }
 
 func New() Model {
@@ -119,7 +127,15 @@ func Run() error {
 // ── Init ──────────────────────────────────────────────────────────────────────
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(loadMsgsCmd(false, ""), tea.WindowSize())
+	return tea.Batch(loadMsgsCmd(false, "", ""), tea.WindowSize())
+}
+
+// activeAccount returns the account filter string for the current tab ("" = Alle).
+func (m Model) activeAccount() string {
+	if m.activeTab == 0 || m.activeTab >= len(m.accounts) {
+		return ""
+	}
+	return m.accounts[m.activeTab]
 }
 
 // ── Update ────────────────────────────────────────────────────────────────────
@@ -134,6 +150,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case msgsLoadedMsg:
 		m.msgs = msg.msgs
+		if len(msg.accounts) > 0 {
+			m.accounts = append([]string{"Alle"}, msg.accounts...)
+		}
 		if m.cursor >= len(m.msgs) {
 			m.cursor = max(0, len(m.msgs)-1)
 		}
@@ -144,6 +163,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = msg.err
 		} else {
 			m.msgs = msg.msgs
+			if len(msg.accounts) > 0 {
+				m.accounts = append([]string{"Alle"}, msg.accounts...)
+			}
 			m.cursor = 0
 			m.setStatus(fmt.Sprintf("Synced %d messages", len(msg.msgs)))
 		}
@@ -208,7 +230,7 @@ func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "enter":
 			m.searchQ = m.searchInput.Value()
 			m.searching = false
-			return m, loadMsgsCmd(m.unreadOnly, m.searchQ)
+			return m, loadMsgsCmd(m.unreadOnly, m.searchQ, m.activeAccount())
 		case "esc":
 			m.searching = false
 			m.searchInput.SetValue("")
@@ -224,6 +246,18 @@ func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "q", "ctrl+c":
 		return m, tea.Quit
+	case "tab":
+		if len(m.accounts) > 0 {
+			m.activeTab = (m.activeTab + 1) % len(m.accounts)
+			m.cursor = 0
+			return m, loadMsgsCmd(m.unreadOnly, m.searchQ, m.activeAccount())
+		}
+	case "shift+tab":
+		if len(m.accounts) > 0 {
+			m.activeTab = (m.activeTab - 1 + len(m.accounts)) % len(m.accounts)
+			m.cursor = 0
+			return m, loadMsgsCmd(m.unreadOnly, m.searchQ, m.activeAccount())
+		}
 	case "j", "down":
 		if m.cursor < len(m.msgs)-1 {
 			m.cursor++
@@ -257,7 +291,7 @@ func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "u":
 		m.unreadOnly = !m.unreadOnly
-		return m, loadMsgsCmd(m.unreadOnly, m.searchQ)
+		return m, loadMsgsCmd(m.unreadOnly, m.searchQ, m.activeAccount())
 	case "/":
 		m.searching = true
 		m.searchInput.Focus()
@@ -265,7 +299,7 @@ func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "esc":
 		m.searchQ = ""
 		m.searchInput.SetValue("")
-		return m, loadMsgsCmd(m.unreadOnly, "")
+		return m, loadMsgsCmd(m.unreadOnly, "", m.activeAccount())
 	}
 	return m, nil
 }
@@ -330,8 +364,30 @@ func (m Model) View() string {
 func (m Model) renderList() string {
 	var b strings.Builder
 
-	// header
-	title := "mailctl"
+	// tab bar
+	if len(m.accounts) > 0 {
+		var tabs []string
+		for i, a := range m.accounts {
+			if i == m.activeTab {
+				tabs = append(tabs, styleTabActive.Render(a))
+			} else {
+				tabs = append(tabs, styleTabInact.Render(a))
+			}
+		}
+		bar := strings.Join(tabs, " ")
+		if m.syncing {
+			bar += styleHelp.Render(" ⟳")
+		}
+		b.WriteString(bar + "\n")
+	} else {
+		title := "mailctl"
+		if m.syncing {
+			title += " ⟳"
+		}
+		b.WriteString(styleHeader.Render(title) + "\n")
+	}
+
+	// active filters
 	filters := ""
 	if m.unreadOnly {
 		filters += " [unread]"
@@ -339,10 +395,10 @@ func (m Model) renderList() string {
 	if m.searchQ != "" {
 		filters += fmt.Sprintf(" [/%s]", m.searchQ)
 	}
-	if m.syncing {
-		filters += " ⟳"
+	if filters != "" {
+		b.WriteString(styleHelp.Render(filters) + "\n")
 	}
-	b.WriteString(styleHeader.Render(title+filters) + "\n\n")
+	b.WriteString("\n")
 
 	if m.searching {
 		b.WriteString("Search: " + m.searchInput.View() + "\n\n")
@@ -380,7 +436,7 @@ func (m Model) renderList() string {
 	} else if m.status != "" {
 		b.WriteString(styleSent.Render("✓ "+m.status) + "\n")
 	} else {
-		b.WriteString(styleHelp.Render("enter:open  n:new  r:reply  s:sync  u:unread  /:search  q:quit"))
+		b.WriteString(styleHelp.Render("enter:open  n:new  s:sync  u:unread  /:search  tab:account  q:quit"))
 	}
 	return b.String()
 }
@@ -426,14 +482,16 @@ func (m Model) renderCompose() string {
 
 // ── Commands ──────────────────────────────────────────────────────────────────
 
-func loadMsgsCmd(unreadOnly bool, query string) tea.Cmd {
+func loadMsgsCmd(unreadOnly bool, query, account string) tea.Cmd {
 	return func() tea.Msg {
 		s, err := store.New(config.DBPath())
 		if err != nil {
 			return errMsg{err}
 		}
 		defer s.Close()
-		msgs, err := s.ListMessages(context.Background(), store.Filter{
+		ctx := context.Background()
+		msgs, err := s.ListMessages(ctx, store.Filter{
+			Account:    account,
 			UnreadOnly: unreadOnly,
 			Query:      query,
 			Limit:      200,
@@ -441,7 +499,8 @@ func loadMsgsCmd(unreadOnly bool, query string) tea.Cmd {
 		if err != nil {
 			return errMsg{err}
 		}
-		return msgsLoadedMsg{msgs}
+		accounts, _ := s.ListAccounts(ctx)
+		return msgsLoadedMsg{msgs: msgs, accounts: accounts}
 	}
 }
 
@@ -462,7 +521,8 @@ func syncCmd() tea.Cmd {
 			_ = s.UpsertMessage(ctx, &msgs[i])
 		}
 		loaded, _ := s.ListMessages(ctx, store.Filter{Limit: 200})
-		return syncDoneMsg{msgs: loaded}
+		accounts, _ := s.ListAccounts(ctx)
+		return syncDoneMsg{msgs: loaded, accounts: accounts}
 	}
 }
 
