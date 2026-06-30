@@ -5,7 +5,6 @@ import (
 	"os/exec"
 	"strings"
 	"time"
-	"unicode"
 
 	"github.com/aeon022/mailctl/internal/models"
 	"github.com/google/uuid"
@@ -103,10 +102,18 @@ tell application "Mail"
 				set mID to message id of m
 				set readStr to "0"
 				if mRead then set readStr to "1"
+				-- format date as locale-independent ISO string
+				set yr to year of mDate as string
+				set mo to text -2 thru -1 of ("0" & ((month of mDate as integer) as string))
+				set dy to text -2 thru -1 of ("0" & (day of mDate as string))
+				set hr to text -2 thru -1 of ("0" & (hours of mDate as string))
+				set mn to text -2 thru -1 of ("0" & (minutes of mDate as string))
+				set sc to text -2 thru -1 of ("0" & (seconds of mDate as string))
+				set mDateStr to yr & "-" & mo & "-" & dy & "T" & hr & ":" & mn & ":" & sc
 				set output to output & "ID:" & mID & linefeed
 				set output to output & "SUBJECT:" & mSubject & linefeed
 				set output to output & "FROM:" & mFrom & linefeed
-				set output to output & "DATE:" & ((mDate as string)) & linefeed
+				set output to output & "DATE:" & mDateStr & linefeed
 				set output to output & "READ:" & readStr & linefeed
 				set output to output & "ACCOUNT:" & (name of a) & linefeed
 				set output to output & "BODY:" & linefeed
@@ -166,19 +173,21 @@ tell application "Mail"
 		set mDate to date received of m
 		set mRead to read status of m
 		set mID to message id of m
-		set mBody to ""
-		try
-			set mBody to content of m
-			if length of mBody > 2000 then set mBody to text 1 thru 2000 of mBody
-		end try
 		set readStr to "0"
 		if mRead then set readStr to "1"
+		set yr to year of mDate as string
+		set mo to text -2 thru -1 of ("0" & ((month of mDate as integer) as string))
+		set dy to text -2 thru -1 of ("0" & (day of mDate as string))
+		set hr to text -2 thru -1 of ("0" & (hours of mDate as string))
+		set mn to text -2 thru -1 of ("0" & (minutes of mDate as string))
+		set sc to text -2 thru -1 of ("0" & (seconds of mDate as string))
+		set mDateStr to yr & "-" & mo & "-" & dy & "T" & hr & ":" & mn & ":" & sc
 		set output to output & "ID:" & mID & linefeed
 		set output to output & "SUBJECT:" & mSubject & linefeed
 		set output to output & "FROM:" & mFrom & linefeed
-		set output to output & "DATE:" & ((mDate as string)) & linefeed
+		set output to output & "DATE:" & mDateStr & linefeed
 		set output to output & "READ:" & readStr & linefeed
-		set output to output & "BODY:" & mBody & linefeed
+		set output to output & "BODY:" & linefeed
 		set output to output & "---MSG---" & linefeed
 	end repeat
 	return output
@@ -209,20 +218,22 @@ tell application "Mail"
 					set mDate to date received of m
 					set mRead to read status of m
 					set mID to message id of m
-					set mBody to ""
-					try
-						set mBody to content of m
-						if length of mBody > 3000 then set mBody to text 1 thru 3000 of mBody
-					end try
 					set readStr to "0"
 					if mRead then set readStr to "1"
+					set yr to year of mDate as string
+					set mo to text -2 thru -1 of ("0" & ((month of mDate as integer) as string))
+					set dy to text -2 thru -1 of ("0" & (day of mDate as string))
+					set hr to text -2 thru -1 of ("0" & (hours of mDate as string))
+					set mn to text -2 thru -1 of ("0" & (minutes of mDate as string))
+					set sc to text -2 thru -1 of ("0" & (seconds of mDate as string))
+					set mDateStr to yr & "-" & mo & "-" & dy & "T" & hr & ":" & mn & ":" & sc
 					set output to output & "ID:" & mID & linefeed
 					set output to output & "SUBJECT:" & mSubject & linefeed
 					set output to output & "FROM:" & mFrom & linefeed
-					set output to output & "DATE:" & ((mDate as string)) & linefeed
+					set output to output & "DATE:" & mDateStr & linefeed
 					set output to output & "READ:" & readStr & linefeed
 					set output to output & "ACCOUNT:" & (name of a) & linefeed
-					set output to output & "BODY:" & mBody & linefeed
+					set output to output & "BODY:" & linefeed
 					set output to output & "---MSG---" & linefeed
 				end repeat
 			end try
@@ -318,34 +329,20 @@ func parseMessages(raw, defaultMailbox string) []models.Message {
 	return msgs
 }
 
-// parseAppleDate handles Apple's locale-dependent date strings.
+// parseAppleDate parses the ISO date string we format in AppleScript.
 func parseAppleDate(s string) time.Time {
-	formats := []string{
-		"Monday, January 2, 2006 at 3:04:05 PM",
-		"Monday, January 2, 2006 at 15:04:05",
-		"January 2, 2006 at 3:04:05 PM",
-		"2006-01-02 15:04:05 +0000",
-		time.RFC1123Z,
-		time.RFC1123,
+	s = strings.TrimSpace(s)
+	t, err := time.ParseInLocation("2006-01-02T15:04:05", s, time.Local)
+	if err == nil {
+		return t
 	}
-	// strip timezone name in parens e.g. "(CET)"
-	if idx := strings.LastIndex(s, "("); idx > 0 {
-		s = strings.TrimSpace(s[:idx])
-	}
-	for _, f := range formats {
-		if t, err := time.ParseInLocation(f, s, time.Local); err == nil {
-			return t
+	// fallback for any legacy cached values
+	for _, f := range []string{time.RFC3339, time.RFC1123Z, time.RFC1123} {
+		if t, err := time.Parse(f, s); err == nil {
+			return t.Local()
 		}
 	}
-	// try stripping non-printable / unusual chars
-	cleaned := strings.Map(func(r rune) rune {
-		if unicode.IsPrint(r) {
-			return r
-		}
-		return -1
-	}, s)
-	_ = cleaned
-	return time.Now()
+	return time.Time{}
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
