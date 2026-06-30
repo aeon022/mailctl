@@ -480,7 +480,7 @@ func (m Model) renderList() string {
 				parts = append(parts, styleTabInact.Render(a))
 			}
 		}
-		bar := strings.Join(parts, "")
+		bar := strings.Join(parts, " ")
 		if m.syncing {
 			bar += "  " + styleSyncing.Render("⟳ syncing…")
 		}
