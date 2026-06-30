@@ -36,36 +36,46 @@ const (
 // ── Styles ────────────────────────────────────────────────────────────────────
 
 var (
-	colorBlue   = lipgloss.AdaptiveColor{Light: "21", Dark: "39"}
-	colorGreen  = lipgloss.AdaptiveColor{Light: "28", Dark: "42"}
-	colorRed    = lipgloss.AdaptiveColor{Light: "160", Dark: "203"}
-	colorMuted  = lipgloss.AdaptiveColor{Light: "244", Dark: "240"}
-	colorSubtle = lipgloss.AdaptiveColor{Light: "250", Dark: "237"}
+	// palette
+	colorBlue    = lipgloss.AdaptiveColor{Light: "25",  Dark: "33"}
+	colorGreen   = lipgloss.AdaptiveColor{Light: "28",  Dark: "42"}
+	colorRed     = lipgloss.AdaptiveColor{Light: "160", Dark: "203"}
+	colorMuted   = lipgloss.AdaptiveColor{Light: "243", Dark: "246"} // readable on both bg
+	colorSubtle  = lipgloss.AdaptiveColor{Light: "250", Dark: "239"}
+	colorTabBg   = lipgloss.AdaptiveColor{Light: "252", Dark: "235"} // inactive tab bg
 
+	// tab bar
 	styleTabActive = lipgloss.NewStyle().
 			Bold(true).
 			Foreground(lipgloss.Color("15")).
-			Background(lipgloss.AdaptiveColor{Light: "21", Dark: "39"}).
+			Background(colorBlue).
 			Padding(0, 2)
 	styleTabInact = lipgloss.NewStyle().
-			Foreground(colorMuted).
+			Foreground(lipgloss.AdaptiveColor{Light: "237", Dark: "252"}).
+			Background(colorTabBg).
 			Padding(0, 2)
-	styleTabCount = lipgloss.NewStyle().Foreground(colorMuted)
 
-	styleDivider  = lipgloss.NewStyle().Foreground(colorSubtle)
-	styleUnread   = lipgloss.NewStyle().Bold(true)
-	styleRead     = lipgloss.NewStyle().Foreground(colorMuted)
-	styleSelected = lipgloss.NewStyle().
-			Background(lipgloss.AdaptiveColor{Light: "254", Dark: "236"}).
-			Bold(true)
-	styleHeader   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.AdaptiveColor{Light: "21", Dark: "39"})
-	styleSubject  = lipgloss.NewStyle().Bold(true)
-	styleMeta     = lipgloss.NewStyle().Foreground(colorMuted)
-	styleLabel    = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "21", Dark: "39"}).Width(9)
+	// list
+	styleDivider   = lipgloss.NewStyle().Foreground(colorSubtle)
+	styleUnread    = lipgloss.NewStyle().Bold(true)
+	styleRead      = lipgloss.NewStyle().Foreground(colorMuted)
+	styleSelected  = lipgloss.NewStyle().
+				Background(lipgloss.AdaptiveColor{Light: "189", Dark: "17"}).
+				Foreground(lipgloss.AdaptiveColor{Light: "16",  Dark: "255"}).
+				Bold(true)
+	styleAcctBadge = lipgloss.NewStyle().
+				Foreground(lipgloss.AdaptiveColor{Light: "25", Dark: "75"})
+
+	// detail / compose
+	styleHeader  = lipgloss.NewStyle().Bold(true).Foreground(colorBlue)
+	styleSubject = lipgloss.NewStyle().Bold(true)
+	styleMeta    = lipgloss.NewStyle().Foreground(colorMuted)
+	styleLabel   = lipgloss.NewStyle().Foreground(colorBlue).Width(9)
+
+	// status
 	styleHelp     = lipgloss.NewStyle().Foreground(colorMuted)
 	styleErr      = lipgloss.NewStyle().Foreground(colorRed)
 	styleOK       = lipgloss.NewStyle().Foreground(colorGreen)
-	styleAcctBadge = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "33", Dark: "75"})
 	styleSyncing  = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "214", Dark: "220"})
 )
 
