@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"hash/fnv"
 	"strings"
 	"time"
 
@@ -73,11 +74,31 @@ var (
 	styleLabel   = lipgloss.NewStyle().Foreground(colorBlue).Width(9)
 
 	// status
-	styleHelp     = lipgloss.NewStyle().Foreground(colorMuted)
-	styleErr      = lipgloss.NewStyle().Foreground(colorRed)
-	styleOK       = lipgloss.NewStyle().Foreground(colorGreen)
-	styleSyncing  = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "214", Dark: "220"})
+	styleHelp    = lipgloss.NewStyle().Foreground(colorMuted)
+	styleErr     = lipgloss.NewStyle().Foreground(colorRed)
+	styleOK      = lipgloss.NewStyle().Foreground(colorGreen)
+	styleSyncing = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "214", Dark: "220"})
+	styleToday   = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "214", Dark: "220"}).Bold(true)
 )
+
+// senderPalette: 8 distinct colors, avoid red/green (used for status).
+// Pad sender name BEFORE applying color so ANSI codes don't break width math.
+var senderPalette = []lipgloss.AdaptiveColor{
+	{Light: "25",  Dark: "39"},  // blue
+	{Light: "91",  Dark: "135"}, // purple
+	{Light: "30",  Dark: "43"},  // teal
+	{Light: "130", Dark: "173"}, // orange
+	{Light: "23",  Dark: "44"},  // dark cyan
+	{Light: "125", Dark: "168"}, // magenta
+	{Light: "58",  Dark: "136"}, // gold
+	{Light: "17",  Dark: "69"},  // navy
+}
+
+func senderStyle(from string) lipgloss.Style {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(extractEmail(from)))
+	return lipgloss.NewStyle().Foreground(senderPalette[int(h.Sum32())%len(senderPalette)])
+}
 
 // ── Messages ──────────────────────────────────────────────────────────────────
 
@@ -782,10 +803,17 @@ func formatListRow(msg *models.Message, width int, showAcct bool) string {
 		dot = "●"
 	}
 
-	// smart date
-	date := smartDate(msg.Date)
+	// ── date column (14 chars, pad BEFORE styling) ──
+	dateRaw := smartDate(msg.Date)
+	datePadded := fmt.Sprintf("%-14s", dateRaw)
+	var dateStyled string
+	if strings.HasPrefix(dateRaw, "Today") {
+		dateStyled = styleToday.Render(datePadded)
+	} else {
+		dateStyled = styleMeta.Render(datePadded)
+	}
 
-	// from: strip email, truncate
+	// ── from column (20 chars, pad BEFORE styling) ──
 	from := msg.From
 	if idx := strings.Index(from, "<"); idx > 0 {
 		from = strings.TrimSpace(from[:idx])
@@ -793,18 +821,21 @@ func formatListRow(msg *models.Message, width int, showAcct bool) string {
 	if len(from) > 20 {
 		from = from[:19] + "…"
 	}
+	fromPadded := fmt.Sprintf("%-20s", from)
+	fromStyled := senderStyle(msg.From).Render(fromPadded)
 
-	// account badge (only in Alle tab)
+	// ── account badge (only in Alle tab) ──
 	acctBadge := ""
+	acctW := 0
 	if showAcct && msg.Account != "" {
-		short := acctShort(msg.Account)
-		acctBadge = styleAcctBadge.Render("[" + short + "]")
+		badge := "[" + acctShort(msg.Account) + "]"
+		acctBadge = styleAcctBadge.Render(badge) + "  "
+		acctW = len(badge) + 2
 	}
-	acctW := lipgloss.Width(acctBadge)
 
-	// subject truncation: fill remaining width
-	// layout: "●  Jan 02 15:04  FromName……………  [Acct]  Subject…"
-	fixed := 2 + 14 + 2 + 20 + 2 + acctW + 2 // dot+sp, date, sp, from, sp, badge, sp
+	// ── subject: fill remaining width ──
+	// dot(1) + 2 + date(14) + 2 + from(20) + 2 + acctW + subject
+	fixed := 1 + 2 + 14 + 2 + 20 + 2 + acctW
 	subjectW := width - fixed
 	if subjectW < 10 {
 		subjectW = 10
@@ -814,12 +845,7 @@ func formatListRow(msg *models.Message, width int, showAcct bool) string {
 		subject = subject[:subjectW-1] + "…"
 	}
 
-	line := fmt.Sprintf("%s  %-14s  %-20s  ", dot, date, from)
-	if showAcct {
-		line += acctBadge + "  "
-	}
-	line += subject
-	return line
+	return dot + "  " + dateStyled + "  " + fromStyled + "  " + acctBadge + subject
 }
 
 func formatDetail(msg *models.Message, width int) string {
