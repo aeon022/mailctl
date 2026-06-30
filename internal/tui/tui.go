@@ -120,6 +120,8 @@ type bodyLoadedMsg struct {
 	err  error
 }
 type readMarkedMsg struct{}
+type unreadMarkedMsg struct{}
+type deletedMsg struct{ err error }
 type openedMsg struct{}
 
 // ── Model ─────────────────────────────────────────────────────────────────────
@@ -255,6 +257,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case readMarkedMsg:
 		// local state already updated optimistically
 
+	case unreadMarkedMsg:
+		// local state already updated optimistically
+
+	case deletedMsg:
+		if msg.err != nil {
+			m.err = msg.err
+		}
+
 	case sentMsg:
 		if msg.err != nil {
 			m.err = msg.err
@@ -341,6 +351,12 @@ func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.cursor > 0 {
 			m.cursor--
 		}
+	case "pgdown", "ctrl+f":
+		page := max(1, m.height/3)
+		m.cursor = min(len(m.msgs)-1, m.cursor+page)
+	case "pgup", "ctrl+b":
+		page := max(1, m.height/3)
+		m.cursor = max(0, m.cursor-page)
 	case "g":
 		m.cursor = 0
 	case "G":
@@ -362,6 +378,17 @@ func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "o":
 		if len(m.msgs) > 0 {
 			return m, openInMailCmd(m.msgs[m.cursor].ID)
+		}
+	case "d":
+		if len(m.msgs) > 0 {
+			id := m.msgs[m.cursor].ID
+			// optimistic remove
+			m.msgs = append(m.msgs[:m.cursor], m.msgs[m.cursor+1:]...)
+			if m.cursor >= len(m.msgs) {
+				m.cursor = max(0, len(m.msgs)-1)
+			}
+			m.setStatus("Deleted")
+			return m, deleteCmd(id)
 		}
 	case "n":
 		m.replyTo = nil
@@ -401,6 +428,36 @@ func (m Model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "o":
 		if m.detail != nil {
 			return m, openInMailCmd(m.detail.ID)
+		}
+	case "u":
+		if m.detail != nil {
+			m.detail.Read = false
+			// reflect in list
+			for i := range m.msgs {
+				if m.msgs[i].ID == m.detail.ID {
+					m.msgs[i].Read = false
+					break
+				}
+			}
+			return m, markUnreadCmd(m.detail.ID)
+		}
+	case "d":
+		if m.detail != nil {
+			id := m.detail.ID
+			// optimistic remove from list
+			for i := range m.msgs {
+				if m.msgs[i].ID == id {
+					m.msgs = append(m.msgs[:i], m.msgs[i+1:]...)
+					if m.cursor >= len(m.msgs) {
+						m.cursor = max(0, len(m.msgs)-1)
+					}
+					break
+				}
+			}
+			m.detail = nil
+			m.view = viewList
+			m.setStatus("Deleted")
+			return m, deleteCmd(id)
 		}
 	case "r":
 		if m.detail != nil {
@@ -566,7 +623,7 @@ func (m Model) renderList() string {
 	} else if m.status != "" {
 		helpBar = styleOK.Render("✓ " + m.status)
 	} else {
-		helpBar = styleHelp.Render("enter:open  n:new  s:sync  u:unread  o:mail  /:search  tab:acct  q:quit")
+		helpBar = styleHelp.Render("enter:open  n:new  s:sync  u:unread  d:delete  o:mail  /:search  tab:acct  q:quit")
 	}
 	rightPad := w - lipgloss.Width(helpBar) - lipgloss.Width(countStr)
 	if rightPad < 0 {
@@ -603,7 +660,7 @@ func (m Model) renderDetail() string {
 
 	// ── footer ──
 	b.WriteString("\n" + styleDivider.Render(strings.Repeat("─", w)) + "\n")
-	b.WriteString(styleHelp.Render("esc:back  r:reply  o:mail  ↑↓/jk:scroll  q:quit"))
+	b.WriteString(styleHelp.Render("esc:back  r:reply  u:unread  d:delete  o:mail  ↑↓/jk:scroll  q:quit"))
 	return b.String()
 }
 
@@ -764,6 +821,34 @@ func openInMailCmd(messageID string) tea.Cmd {
 	return func() tea.Msg {
 		_ = mail.OpenInMail(messageID)
 		return openedMsg{}
+	}
+}
+
+func markUnreadCmd(id string) tea.Cmd {
+	return func() tea.Msg {
+		s, err := store.New(config.DBPath())
+		if err != nil {
+			return unreadMarkedMsg{}
+		}
+		defer s.Close()
+		_ = s.MarkUnread(context.Background(), id)
+		_ = mail.MarkUnreadInMail(id)
+		return unreadMarkedMsg{}
+	}
+}
+
+func deleteCmd(id string) tea.Cmd {
+	return func() tea.Msg {
+		s, err := store.New(config.DBPath())
+		if err != nil {
+			return deletedMsg{err}
+		}
+		defer s.Close()
+		if err := s.DeleteMessage(context.Background(), id); err != nil {
+			return deletedMsg{err}
+		}
+		_ = mail.DeleteInMail(id)
+		return deletedMsg{}
 	}
 }
 

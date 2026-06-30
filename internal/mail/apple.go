@@ -310,6 +310,46 @@ end tell`
 	return accounts, nil
 }
 
+// MarkUnreadInMail sets the read status of a message to unread in Apple Mail.
+func MarkUnreadInMail(messageID string) error {
+	script := fmt.Sprintf(`
+tell application "Mail"
+	repeat with a in accounts
+		repeat with mbox in mailboxes of a
+			try
+				set found to (messages of mbox whose message id is %q)
+				if (count of found) > 0 then
+					set read status of item 1 of found to false
+					return
+				end if
+			end try
+		end repeat
+	end repeat
+end tell`, messageID)
+	_, err := runAppleScript(script)
+	return err
+}
+
+// DeleteInMail moves a message to Trash in Apple Mail.
+func DeleteInMail(messageID string) error {
+	script := fmt.Sprintf(`
+tell application "Mail"
+	repeat with a in accounts
+		repeat with mbox in mailboxes of a
+			try
+				set found to (messages of mbox whose message id is %q)
+				if (count of found) > 0 then
+					delete item 1 of found
+					return
+				end if
+			end try
+		end repeat
+	end repeat
+end tell`, messageID)
+	_, err := runAppleScript(script)
+	return err
+}
+
 // OpenInMail activates Apple Mail and opens the message with the given message-id.
 func OpenInMail(messageID string) error {
 	script := fmt.Sprintf(`

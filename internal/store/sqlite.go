@@ -132,6 +132,16 @@ func (s *Store) MarkRead(ctx context.Context, id string) error {
 	return err
 }
 
+func (s *Store) MarkUnread(ctx context.Context, id string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE messages SET read=0 WHERE id=?`, id)
+	return err
+}
+
+func (s *Store) DeleteMessage(ctx context.Context, id string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM messages WHERE id=?`, id)
+	return err
+}
+
 // UnreadCounts returns unread message counts per account plus "" for the total.
 func (s *Store) UnreadCounts(ctx context.Context) (map[string]int, error) {
 	rows, err := s.db.QueryContext(ctx,
