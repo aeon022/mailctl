@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"hash/fnv"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -31,7 +32,8 @@ const (
 const (
 	focusTo      = 0
 	focusSubject = 1
-	focusBody    = 2
+	focusAttach  = 2
+	focusBody    = 3
 )
 
 // ── Styles ────────────────────────────────────────────────────────────────────
@@ -78,7 +80,10 @@ var (
 	styleErr     = lipgloss.NewStyle().Foreground(colorRed)
 	styleOK      = lipgloss.NewStyle().Foreground(colorGreen)
 	styleSyncing = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "214", Dark: "220"})
-	styleToday   = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "214", Dark: "220"}).Bold(true)
+	styleToday     = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "214", Dark: "220"}).Bold(true)
+	styleDateWeek  = lipgloss.NewStyle().Foreground(colorMuted)
+	styleDateMonth = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "247", Dark: "242"})
+	styleDateOld   = lipgloss.NewStyle().Foreground(colorSubtle)
 )
 
 // senderPalette: 8 distinct colors, avoid red/green (used for status).
@@ -123,6 +128,7 @@ type readMarkedMsg struct{}
 type unreadMarkedMsg struct{}
 type deletedMsg struct{ err error }
 type openedMsg struct{}
+type clipboardMsg struct{}
 
 // ── Model ─────────────────────────────────────────────────────────────────────
 
@@ -151,6 +157,7 @@ type Model struct {
 	// compose
 	toInput      textinput.Model
 	subjectInput textinput.Model
+	attachInput  textinput.Model
 	bodyArea     textarea.Model
 	composeFocus int
 	replyTo      *models.Message
@@ -160,6 +167,7 @@ type Model struct {
 	statusTime time.Time
 	err        error
 	syncing    bool
+	confirmID  string
 }
 
 func New() Model {
@@ -176,6 +184,10 @@ func New() Model {
 	sub.Placeholder = "Subject"
 	sub.CharLimit = 300
 
+	att := textinput.New()
+	att.Placeholder = "/path/to/file.pdf, /path/to/other.pdf"
+	att.CharLimit = 2000
+
 	body := textarea.New()
 	body.Placeholder = "Write your message here…"
 	body.ShowLineNumbers = false
@@ -185,13 +197,14 @@ func New() Model {
 		searchInput:  si,
 		toInput:      to,
 		subjectInput: sub,
+		attachInput:  att,
 		bodyArea:     body,
 	}
 }
 
 func Run() error {
 	m := New()
-	p := tea.NewProgram(m, tea.WithAltScreen())
+	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	_, err := p.Run()
 	return err
 }
@@ -283,6 +296,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case errMsg:
 		m.err = msg.err
+
+	case tea.MouseMsg:
+		switch msg.Button {
+		case tea.MouseButtonWheelUp:
+			if m.view == viewDetail {
+				m.vp.LineUp(3)
+			} else if m.cursor > 0 {
+				m.cursor--
+			}
+		case tea.MouseButtonWheelDown:
+			if m.view == viewDetail {
+				m.vp.LineDown(3)
+			} else if m.cursor < len(m.msgs)-1 {
+				m.cursor++
+			}
+		}
+		return m, nil
+
+	case clipboardMsg:
+		// no-op; status already set
 
 	case tea.KeyMsg:
 		m.err = nil
@@ -382,13 +415,24 @@ func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "d":
 		if len(m.msgs) > 0 {
 			id := m.msgs[m.cursor].ID
-			// optimistic remove
-			m.msgs = append(m.msgs[:m.cursor], m.msgs[m.cursor+1:]...)
-			if m.cursor >= len(m.msgs) {
-				m.cursor = max(0, len(m.msgs)-1)
+			if m.confirmID == id {
+				m.confirmID = ""
+				m.msgs = append(m.msgs[:m.cursor], m.msgs[m.cursor+1:]...)
+				if m.cursor >= len(m.msgs) {
+					m.cursor = max(0, len(m.msgs)-1)
+				}
+				m.setStatus("Deleted")
+				return m, deleteCmd(id)
 			}
-			m.setStatus("Deleted")
-			return m, deleteCmd(id)
+			m.confirmID = id
+			m.setStatus("Press d again to confirm delete  esc to cancel")
+			return m, nil
+		}
+	case "y":
+		if len(m.msgs) > 0 {
+			msg := &m.msgs[m.cursor]
+			m.setStatus("Copied to clipboard")
+			return m, copyToClipboardCmd(msg.Subject + " — " + msg.From)
 		}
 	case "n":
 		m.replyTo = nil
@@ -409,6 +453,11 @@ func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.searchInput.Focus()
 		m.searchInput.SetValue("")
 	case "esc":
+		if m.confirmID != "" {
+			m.confirmID = ""
+			m.status = ""
+			return m, nil
+		}
 		if m.searchQ != "" {
 			m.searchQ = ""
 			m.searchInput.SetValue("")
@@ -422,6 +471,11 @@ func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m Model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "q", "esc":
+		if m.confirmID != "" {
+			m.confirmID = ""
+			m.status = ""
+			return m, nil
+		}
 		m.view = viewList
 		m.detail = nil
 		return m, nil
@@ -441,23 +495,33 @@ func (m Model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, markUnreadCmd(m.detail.ID)
 		}
+	case "y":
+		if m.detail != nil {
+			m.setStatus("Copied to clipboard")
+			return m, copyToClipboardCmd(m.detail.Subject + " — " + m.detail.From)
+		}
 	case "d":
 		if m.detail != nil {
 			id := m.detail.ID
-			// optimistic remove from list
-			for i := range m.msgs {
-				if m.msgs[i].ID == id {
-					m.msgs = append(m.msgs[:i], m.msgs[i+1:]...)
-					if m.cursor >= len(m.msgs) {
-						m.cursor = max(0, len(m.msgs)-1)
+			if m.confirmID == id {
+				m.confirmID = ""
+				for i := range m.msgs {
+					if m.msgs[i].ID == id {
+						m.msgs = append(m.msgs[:i], m.msgs[i+1:]...)
+						if m.cursor >= len(m.msgs) {
+							m.cursor = max(0, len(m.msgs)-1)
+						}
+						break
 					}
-					break
 				}
+				m.detail = nil
+				m.view = viewList
+				m.setStatus("Deleted")
+				return m, deleteCmd(id)
 			}
-			m.detail = nil
-			m.view = viewList
-			m.setStatus("Deleted")
-			return m, deleteCmd(id)
+			m.confirmID = id
+			m.setStatus("Press d again to confirm delete  esc to cancel")
+			return m, nil
 		}
 	case "r":
 		if m.detail != nil {
@@ -481,9 +545,9 @@ func (m Model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m Model) updateCompose(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+s":
-		return m, sendCmd(m.toInput.Value(), m.subjectInput.Value(), m.bodyArea.Value())
+		return m, sendCmd(m.toInput.Value(), m.subjectInput.Value(), m.bodyArea.Value(), parseAttachments(m.attachInput.Value()))
 	case "ctrl+d":
-		return m, draftCmd(m.toInput.Value(), m.subjectInput.Value(), m.bodyArea.Value())
+		return m, draftCmd(m.toInput.Value(), m.subjectInput.Value(), m.bodyArea.Value(), parseAttachments(m.attachInput.Value()))
 	case "esc":
 		m.view = viewList
 		return m, nil
@@ -509,6 +573,8 @@ func (m Model) updateCompose(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.toInput, cmd = m.toInput.Update(msg)
 	case focusSubject:
 		m.subjectInput, cmd = m.subjectInput.Update(msg)
+	case focusAttach:
+		m.attachInput, cmd = m.attachInput.Update(msg)
 	case focusBody:
 		m.bodyArea, cmd = m.bodyArea.Update(msg)
 	}
@@ -615,7 +681,7 @@ func (m Model) renderList() string {
 	// ── status / help bar ──
 	countStr := ""
 	if len(m.msgs) > 0 {
-		countStr = styleHelp.Render(fmt.Sprintf(" %d msgs", len(m.msgs)))
+		countStr = styleHelp.Render(fmt.Sprintf(" %d/%d", m.cursor+1, len(m.msgs)))
 	}
 	var helpBar string
 	if m.err != nil {
@@ -623,7 +689,7 @@ func (m Model) renderList() string {
 	} else if m.status != "" {
 		helpBar = styleOK.Render("✓ " + m.status)
 	} else {
-		helpBar = styleHelp.Render("enter:open  n:new  s:sync  u:unread  d:delete  o:mail  /:search  tab:acct  q:quit")
+		helpBar = styleHelp.Render("enter:open  n:new  s:sync  u:unread  d:delete  y:copy  o:mail  /:search  tab:acct  q:quit")
 	}
 	rightPad := w - lipgloss.Width(helpBar) - lipgloss.Width(countStr)
 	if rightPad < 0 {
@@ -660,7 +726,7 @@ func (m Model) renderDetail() string {
 
 	// ── footer ──
 	b.WriteString("\n" + styleDivider.Render(strings.Repeat("─", w)) + "\n")
-	b.WriteString(styleHelp.Render("esc:back  r:reply  u:unread  d:delete  o:mail  ↑↓/jk:scroll  q:quit"))
+	b.WriteString(styleHelp.Render("esc:back  r:reply  u:unread  d:delete  y:copy  o:mail  ↑↓/jk:scroll  q:quit"))
 	return b.String()
 }
 
@@ -719,14 +785,15 @@ func (m Model) renderCompose() string {
 	}
 
 	b.WriteString(focused(focusTo) + " " + styleLabel.Render("To:") + "      " + m.toInput.View() + "\n")
-	b.WriteString(focused(focusSubject) + " " + styleLabel.Render("Subject:") + "  " + m.subjectInput.View() + "\n\n")
+	b.WriteString(focused(focusSubject) + " " + styleLabel.Render("Subject:") + "  " + m.subjectInput.View() + "\n")
+	b.WriteString(focused(focusAttach) + " " + styleLabel.Render("Attach:") + "   " + m.attachInput.View() + "\n\n")
 	b.WriteString(focused(focusBody) + " " + styleLabel.Render("Body:") + "\n")
 	b.WriteString(m.bodyArea.View() + "\n\n")
 
 	if m.err != nil {
 		b.WriteString(styleErr.Render("✗ " + m.err.Error()) + "\n")
 	} else {
-		b.WriteString(styleHelp.Render("tab:next field  ctrl+s:send  ctrl+d:save draft  esc:cancel"))
+		b.WriteString(styleHelp.Render("tab:next  ctrl+s:send  ctrl+d:draft  esc:cancel  attach:comma-sep paths"))
 	}
 	return b.String()
 }
@@ -797,9 +864,9 @@ func markReadCmd(id string) tea.Cmd {
 	}
 }
 
-func sendCmd(to, subject, body string) tea.Cmd {
+func sendCmd(to, subject, body string, attachments []string) tea.Cmd {
 	return func() tea.Msg {
-		d := &models.Draft{To: []string{to}, Subject: subject, Body: body}
+		d := &models.Draft{To: []string{to}, Subject: subject, Body: body, Attachments: attachments}
 		if err := mail.Send(d); err != nil {
 			return sentMsg{err}
 		}
@@ -807,14 +874,25 @@ func sendCmd(to, subject, body string) tea.Cmd {
 	}
 }
 
-func draftCmd(to, subject, body string) tea.Cmd {
+func draftCmd(to, subject, body string, attachments []string) tea.Cmd {
 	return func() tea.Msg {
-		d := &models.Draft{To: []string{to}, Subject: subject, Body: body}
+		d := &models.Draft{To: []string{to}, Subject: subject, Body: body, Attachments: attachments}
 		if err := mail.SaveDraft(d); err != nil {
 			return draftedMsg{err}
 		}
 		return draftedMsg{}
 	}
+}
+
+func parseAttachments(s string) []string {
+	var out []string
+	for _, p := range strings.Split(s, ",") {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func openInMailCmd(messageID string) tea.Cmd {
@@ -857,10 +935,12 @@ func deleteCmd(id string) tea.Cmd {
 func (m *Model) resetCompose(to, subject string) {
 	m.toInput.SetValue(to)
 	m.subjectInput.SetValue(subject)
+	m.attachInput.SetValue("")
 	m.bodyArea.SetValue("")
 	m.composeFocus = focusTo
 	m.toInput.Focus()
 	m.subjectInput.Blur()
+	m.attachInput.Blur()
 	m.bodyArea.Blur()
 }
 
@@ -870,6 +950,8 @@ func (m *Model) blurCompose(f int) {
 		m.toInput.Blur()
 	case focusSubject:
 		m.subjectInput.Blur()
+	case focusAttach:
+		m.attachInput.Blur()
 	case focusBody:
 		m.bodyArea.Blur()
 	}
@@ -881,6 +963,8 @@ func (m *Model) focusCompose(f int) {
 		m.toInput.Focus()
 	case focusSubject:
 		m.subjectInput.Focus()
+	case focusAttach:
+		m.attachInput.Focus()
 	case focusBody:
 		m.bodyArea.Focus()
 	}
@@ -1011,12 +1095,7 @@ func formatListRow(msg *models.Message, width int, showAcct bool) string {
 	// ── date column (14 chars, pad BEFORE styling) ──
 	dateRaw := smartDate(msg.Date)
 	datePadded := fmt.Sprintf("%-14s", dateRaw)
-	var dateStyled string
-	if strings.HasPrefix(dateRaw, "Today") {
-		dateStyled = styleToday.Render(datePadded)
-	} else {
-		dateStyled = styleMeta.Render(datePadded)
-	}
+	dateStyled := coloredDate(datePadded, msg.Date)
 
 	// ── from column (20 chars, pad BEFORE styling) ──
 	from := msg.From
@@ -1103,6 +1182,29 @@ func smartDate(t time.Time) string {
 		return t.Format("Jan 02  15:04")
 	default:
 		return t.Format("Jan 02   2006")
+	}
+}
+
+func coloredDate(s string, t time.Time) string {
+	now := time.Now()
+	switch {
+	case sameDay(t, now):
+		return styleToday.Render(s)
+	case t.After(now.AddDate(0, 0, -7)):
+		return styleDateWeek.Render(s)
+	case t.After(now.AddDate(0, 0, -30)):
+		return styleDateMonth.Render(s)
+	default:
+		return styleDateOld.Render(s)
+	}
+}
+
+func copyToClipboardCmd(text string) tea.Cmd {
+	return func() tea.Msg {
+		cmd := exec.Command("pbcopy")
+		cmd.Stdin = strings.NewReader(text)
+		_ = cmd.Run()
+		return clipboardMsg{}
 	}
 }
 
