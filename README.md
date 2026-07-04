@@ -1,103 +1,278 @@
 # mailctl
 
-Terminal email client for Apple Mail. Syncs your inbox to SQLite, provides a fast TUI and an MCP server for AI agents.
+Terminal email client for Apple Mail. Part of the [missionctl](https://github.com/aeon022/missionctl) suite.
 
-## Features
+Syncs your Apple Mail inbox into a local SQLite cache, provides a fast full-screen TUI, and exposes an MCP server so AI agents (Claude Desktop, etc.) can read and send email on your behalf.
 
-- Full-screen TUI: account tabs, date group headers, body preview, sender colors
-- Sync from Apple Mail via AppleScript (IMAP + Exchange/Office365)
-- Compose, reply with quoted text, save drafts
-- Mark as read/unread, delete (moves to Trash in Apple Mail)
-- Open any message in Apple Mail with `o`
-- MCP server: exposes inbox, search, send, thread tools to AI agents
-- SQLite store with WAL mode — fast even at thousands of messages
+---
 
-## Requirements
+## Quick Start
 
-- macOS with Apple Mail configured and at least one account
-- Go 1.21+
+1. **Clone and build**
 
-## Setup
+   ```bash
+   git clone https://github.com/aeon022/mailctl && cd mailctl
+   ./setup.sh
+   ```
 
-```bash
-git clone https://github.com/aeon022/mailctl
-cd mailctl
-./setup.sh
+2. **Verify Apple Mail is running** with at least one configured account.
+
+3. **Sync your inbox**
+
+   ```bash
+   mailctl sync
+   ```
+
+4. **Open the TUI**
+
+   ```bash
+   mailctl
+   ```
+
+5. **Optional — connect to Claude Desktop** (see [MCP — AI Integration](#mcp--ai-integration)).
+
+---
+
+## Cheatsheet
+
+```
+mailctl [tui]                       Open TUI (default)
+mailctl sync [--live]               Sync inbox from Apple Mail
+mailctl inbox [--count N] [--unread] [--live] [--json]
+mailctl search QUERY [--json]       Search subject / from / body
+mailctl send draft.md               Send from Markdown file
+mailctl draft draft.md              Save to Drafts
+mailctl thread SUBJECT [--json]     Show thread by subject
+mailctl accounts [--json]           List Apple Mail accounts
+mailctl mcp                         Start MCP server (stdio)
 ```
 
-Or manually:
+TUI list view — `j/k` navigate · `enter` open · `n` new · `s` sync · `/` search · `d` delete · `q` quit
+
+TUI detail view — `esc` back · `r` reply · `o` open in Mail · `U` unsubscribe · `q` quit
+
+---
+
+## CLI Reference
+
+### `mailctl` / `mailctl tui`
+
+Open the full-screen TUI. No flags.
 
 ```bash
-go build -o ~/.local/bin/mailctl .
-mailctl sync          # initial sync from Apple Mail
-mailctl               # open TUI
+mailctl
+mailctl tui
 ```
 
-## TUI Keybindings
+---
+
+### `mailctl sync`
+
+Pull messages from Apple Mail into the local SQLite cache via AppleScript.
+
+| Flag | Description |
+|------|-------------|
+| `--live` | Stream sync progress to stdout |
+
+```bash
+mailctl sync
+mailctl sync --live
+```
+
+---
+
+### `mailctl inbox`
+
+List messages from the cached inbox.
+
+| Flag | Description |
+|------|-------------|
+| `--count N` | Return at most N messages (default: 50) |
+| `--unread` | Show only unread messages |
+| `--live` | Re-sync from Apple Mail before listing |
+| `--json` | Output as JSON |
+
+```bash
+mailctl inbox
+mailctl inbox --count 20 --unread
+mailctl inbox --live --json
+```
+
+---
+
+### `mailctl search`
+
+Search the local cache across subject, sender, and body.
+
+| Flag | Description |
+|------|-------------|
+| `--json` | Output as JSON |
+
+```bash
+mailctl search "project proposal"
+mailctl search "invoice" --json
+```
+
+---
+
+### `mailctl send`
+
+Send an email from a Markdown file. See [Email Template Format](#email-template-format) for the file structure.
+
+```bash
+mailctl send draft.md
+```
+
+---
+
+### `mailctl draft`
+
+Save a Markdown email file to Apple Mail Drafts without sending.
+
+```bash
+mailctl draft draft.md
+```
+
+---
+
+### `mailctl thread`
+
+Retrieve all messages in a thread matched by subject string.
+
+| Flag | Description |
+|------|-------------|
+| `--json` | Output as JSON |
+
+```bash
+mailctl thread "Q3 Budget Review"
+mailctl thread "Weekly standup" --json
+```
+
+---
+
+### `mailctl accounts`
+
+List all accounts configured in Apple Mail.
+
+| Flag | Description |
+|------|-------------|
+| `--json` | Output as JSON |
+
+```bash
+mailctl accounts
+mailctl accounts --json
+```
+
+---
+
+### `mailctl mcp`
+
+Start the MCP server on stdio. Used by Claude Desktop and other MCP-compatible clients — not intended for interactive use.
+
+```bash
+mailctl mcp
+```
+
+---
+
+## TUI Keys
 
 ### List view
+
 | Key | Action |
 |-----|--------|
-| `enter` | Open message |
+| `j` / `k` or `↓` / `↑` | Move down / up |
+| `PgDn` / `PgUp` | Page down / up |
+| `g` / `G` | Jump to first / last message |
+| `enter` | Open message detail |
 | `n` | Compose new message |
 | `s` | Sync inbox from Apple Mail |
 | `u` | Toggle unread-only filter |
-| `d` | Delete message (moves to Trash) |
-| `o` | Open in Apple Mail |
 | `/` | Search (subject, from, body) |
 | `tab` / `shift+tab` | Switch account |
-| `j` / `k` or `↓` / `↑` | Navigate |
-| `PgDn` / `PgUp` | Page down / up |
-| `g` / `G` | First / last message |
+| `d` | Delete selected message (press `d` again to confirm, `esc` to cancel) |
+| `y` | Copy subject + sender to clipboard |
 | `q` | Quit |
 
 ### Detail view
+
 | Key | Action |
 |-----|--------|
 | `esc` | Back to list |
+| `j` / `k` or `↑` / `↓` | Scroll body |
 | `r` | Reply (opens compose with quoted text) |
 | `u` | Mark as unread |
+| `U` | Open unsubscribe link in browser (shown only when detected) |
 | `d` | Delete message |
 | `o` | Open in Apple Mail |
-| `↑` / `↓` | Scroll body |
+| `y` | Copy message to clipboard |
+| `q` | Quit |
 
 ### Compose view
+
 | Key | Action |
 |-----|--------|
-| `tab` / `shift+tab` | Next / previous field |
+| `tab` / `shift+tab` | Cycle fields (To, Subject, Attachments, Body) |
 | `ctrl+s` | Send |
 | `ctrl+d` | Save to Drafts |
 | `esc` | Cancel |
 
-## CLI Commands
+---
 
-```bash
-mailctl               # open TUI (default)
-mailctl tui           # open TUI
-mailctl sync          # sync inbox from Apple Mail
-mailctl inbox         # list messages (JSON with --json)
-mailctl send msg.md   # send from Markdown file
-mailctl draft msg.md  # save draft
-mailctl search QUERY  # search messages
-mailctl thread ID     # show thread
-mailctl mcp           # start MCP server (stdio)
-```
+## Email Template Format
 
-### Email Markdown format
+Both `mailctl send` and `mailctl draft` accept a Markdown file with a YAML front matter header.
 
 ```markdown
 ---
-to: [recipient@example.com]
-cc: []
-subject: Hello there
+to: [alice@example.com, bob@example.com]
+cc: [manager@example.com]
+subject: Q3 Report — Draft for Review
+account: work@company.com
+attachments: [/path/to/report.pdf, /path/to/appendix.xlsx]
+vars:
+  name: Alice
+  deadline: Friday
 ---
 
-Message body here.
+Hi {{index . "name"}},
+
+Please find the Q3 report attached. The review deadline is {{index . "deadline"}}.
+
+Sent on {{index . "date"}} — internal reference {{index . "year"}}.
 ```
 
-## MCP Server
+**Front matter fields**
 
-Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_desktop_config.json`):
+| Field | Required | Description |
+|-------|----------|-------------|
+| `to` | Yes | List of recipient addresses |
+| `cc` | No | List of CC addresses |
+| `subject` | Yes | Email subject line |
+| `account` | No | Sender account; uses Apple Mail default if omitted |
+| `attachments` | No | List of absolute file paths to attach |
+| `vars` | No | Key/value pairs available as template variables |
+
+**Template variables**
+
+Variables in the body are Go template expressions using `{{index . "key"}}`.
+
+| Variable | Source | Example output |
+|----------|--------|----------------|
+| `{{index . "name"}}` | `vars.name` in front matter | `Alice` |
+| `{{index . "date"}}` | Built-in | `July 4, 2026` |
+| `{{index . "year"}}` | Built-in | `2026` |
+| Any other key | `vars.*` in front matter | Custom value |
+
+---
+
+## MCP — AI Integration
+
+mailctl includes a built-in MCP (Model Context Protocol) server that exposes your inbox and sending capabilities to AI agents such as Claude Desktop.
+
+### Configuration
+
+Add the following to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
 ```json
 {
@@ -110,14 +285,61 @@ Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_
 }
 ```
 
-Available tools: `list_messages`, `get_message_body`, `search_messages`, `send_message`, `get_thread`
+Restart Claude Desktop. The `mailctl` tools will appear automatically.
+
+### Available MCP tools
+
+| Tool | Description |
+|------|-------------|
+| `inbox` | List recent inbox messages with sender, subject, and body preview |
+| `search_email` | Search across subject, sender, and body by keyword |
+| `email_thread` | Retrieve all messages in a thread matched by subject |
+| `send_email` | Send an email (body, to, subject; optional cc, bcc, account) |
+| `draft_email` | Save a composed message to Apple Mail Drafts |
+| `sync_inbox` | Trigger a sync from Apple Mail into the local cache |
+
+### Practical workflows
+
+**Morning email briefing**
+
+Ask Claude: *"Summarize my unread emails from the past 24 hours, grouped by sender. Flag anything that looks urgent."*
+
+Claude calls `sync_inbox` to get current data, then `inbox` with an unread filter, and returns a structured summary without you opening your mail client.
+
+**Send a templated message to multiple contacts**
+
+Prepare a recipient list and ask Claude: *"Send the attached onboarding template to each person on this list, personalizing the greeting with their first name."*
+
+Claude calls `send_email` once per recipient, substituting the name field each time. The account field can be specified per call to send from the correct address.
+
+**Find and respond to a thread**
+
+Ask Claude: *"Find the thread about the vendor contract and draft a reply saying we need one more week."*
+
+Claude calls `search_email` to locate the thread, `email_thread` to retrieve the full context, then `draft_email` to save a reply for your review before sending.
+
+---
 
 ## Architecture
 
 ```
-Apple Mail (AppleScript)
-    ↓ sync
-SQLite (~/.local/share/mailctl/mail.db)
-    ↓
-TUI (Bubbletea)  ←→  MCP Server (stdio)
+Apple Mail (AppleScript)  —sync—>  SQLite (~/.local/share/mailctl/mail.db)
+                                          |
+                          +---------------+---------------+
+                          |                               |
+                   TUI (Bubbletea)              MCP server (stdio)
+                   mailctl / mailctl tui        mailctl mcp
 ```
+
+AppleScript bridges mailctl to Apple Mail for all read and write operations (sync, send, draft, delete, open). The SQLite store uses WAL mode for fast concurrent reads. The TUI and MCP server both query the same database, so a sync triggered from the TUI is immediately visible to an AI agent and vice versa.
+
+---
+
+## Requirements
+
+- macOS with Apple Mail configured and at least one account
+- Go 1.21+
+
+## License
+
+See [LICENSE](LICENSE).
