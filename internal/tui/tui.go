@@ -495,6 +495,14 @@ func (m Model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, markUnreadCmd(m.detail.ID)
 		}
+	case "U":
+		if m.detail != nil {
+			if link := findUnsubscribeURL(m.detail.Body); link != "" {
+				m.setStatus("Opening unsubscribe link…")
+				return m, openURLCmd(link)
+			}
+			m.setStatus("No unsubscribe link found in this email")
+		}
 	case "y":
 		if m.detail != nil {
 			m.setStatus("Copied to clipboard")
@@ -726,7 +734,11 @@ func (m Model) renderDetail() string {
 
 	// ── footer ──
 	b.WriteString("\n" + styleDivider.Render(strings.Repeat("─", w)) + "\n")
-	b.WriteString(styleHelp.Render("esc:back  r:reply  u:unread  d:delete  y:copy  o:mail  ↑↓/jk:scroll  q:quit"))
+	helpLine := "esc:back  r:reply  u:unread  d:delete  y:copy  o:mail  ↑↓/jk:scroll  q:quit"
+	if m.detail != nil && findUnsubscribeURL(m.detail.Body) != "" {
+		helpLine += "  U:unsubscribe"
+	}
+	b.WriteString(styleHelp.Render(helpLine))
 	return b.String()
 }
 
@@ -1254,6 +1266,51 @@ func max(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// findUnsubscribeURL scans an email body for a URL near an "unsubscribe" keyword.
+func findUnsubscribeURL(body string) string {
+	lower := strings.ToLower(body)
+	idx := strings.Index(lower, "unsubscribe")
+	if idx < 0 {
+		return ""
+	}
+	// search for https:// within ±500 chars of "unsubscribe"
+	start := max(0, idx-300)
+	end := idx + 500
+	if end > len(body) {
+		end = len(body)
+	}
+	window := body[start:end]
+	// find https:// link
+	hi := strings.Index(window, "https://")
+	if hi < 0 {
+		hi = strings.Index(window, "http://")
+	}
+	if hi < 0 {
+		return ""
+	}
+	url := window[hi:]
+	// cut at first whitespace, angle bracket, quote, or newline
+	for i, r := range url {
+		if r == ' ' || r == '\n' || r == '\r' || r == '\t' ||
+			r == '<' || r == '>' || r == '"' || r == '\'' || r == ')' {
+			url = url[:i]
+			break
+		}
+	}
+	if strings.Contains(strings.ToLower(url), "unsubscribe") || strings.Contains(strings.ToLower(window[:hi]), "unsubscribe") {
+		return url
+	}
+	return ""
+}
+
+// openURLCmd opens a URL in the default browser (macOS).
+func openURLCmd(url string) tea.Cmd {
+	return func() tea.Msg {
+		_ = exec.Command("open", url).Start()
+		return nil
+	}
 }
 
 func min(a, b int) int {
