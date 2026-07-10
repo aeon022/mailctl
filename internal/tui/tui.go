@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aeon022/mailctl/internal/ai"
 	"github.com/aeon022/mailctl/internal/config"
 	"github.com/aeon022/mailctl/internal/mail"
 	"github.com/aeon022/mailctl/internal/models"
@@ -119,6 +120,8 @@ type syncDoneMsg struct {
 }
 type sentMsg struct{ err error }
 type draftedMsg struct{ err error }
+type aiDraftMsg struct{ body string }
+type aiDraftErrMsg struct{ err error }
 type errMsg struct{ err error }
 type bodyLoadedMsg struct {
 	body string
@@ -167,6 +170,7 @@ type Model struct {
 	statusTime time.Time
 	err        error
 	syncing    bool
+	aiDrafting bool
 	confirmID  string
 }
 
@@ -293,6 +297,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setStatus("Saved to Drafts")
 			m.view = viewList
 		}
+
+	case aiDraftMsg:
+		m.aiDrafting = false
+		if m.detail != nil {
+			replySubject := m.detail.Subject
+			if !strings.HasPrefix(replySubject, "Re: ") {
+				replySubject = "Re: " + replySubject
+			}
+			m.replyTo = m.detail
+			m.resetCompose(extractEmail(m.detail.From), replySubject)
+			m.bodyArea.SetValue(msg.body)
+			m.setStatus("Claude drafted a reply — review and ctrl+s to send")
+			m.view = viewCompose
+		}
+		return m, nil
+
+	case aiDraftErrMsg:
+		m.aiDrafting = false
+		m.setStatus("AI error: " + msg.err.Error())
+		return m, nil
 
 	case errMsg:
 		m.err = msg.err
@@ -544,6 +568,19 @@ func (m Model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.view = viewCompose
 			return m, nil
 		}
+	case "a":
+		if m.detail != nil && !m.aiDrafting {
+			m.aiDrafting = true
+			m.setStatus("Claude is drafting a reply…")
+			detail := m.detail
+			return m, func() tea.Msg {
+				body, err := ai.Draft(detail.Subject, detail.Body)
+				if err != nil {
+					return aiDraftErrMsg{err}
+				}
+				return aiDraftMsg{body}
+			}
+		}
 	}
 	var cmd tea.Cmd
 	m.vp, cmd = m.vp.Update(msg)
@@ -734,11 +771,14 @@ func (m Model) renderDetail() string {
 
 	// ── footer ──
 	b.WriteString("\n" + styleDivider.Render(strings.Repeat("─", w)) + "\n")
-	helpLine := "esc:back  r:reply  u:unread  d:delete  y:copy  o:mail  ↑↓/jk:scroll  q:quit"
+	helpLine := "esc:back  r:reply  a:ai draft  u:unread  d:delete  y:copy  o:mail  ↑↓/jk:scroll  q:quit"
 	if m.detail != nil && findUnsubscribeURL(m.detail.Body) != "" {
 		helpLine += "  U:unsubscribe"
 	}
 	b.WriteString(styleHelp.Render(helpLine))
+	if m.aiDrafting {
+		b.WriteString("\n" + styleSyncing.Render("  ⠋ Claude is drafting a reply…"))
+	}
 	return b.String()
 }
 
