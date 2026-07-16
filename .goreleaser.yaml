@@ -43,6 +43,7 @@ brews:
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
     directory: Formula
     homepage: https://github.com/aeon022/mailctl
+    license: MIT
     description: "Email from your terminal - send and read email from Markdown files"
     install: |
       bin.install "mailctl"
