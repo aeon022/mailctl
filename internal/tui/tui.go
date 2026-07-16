@@ -14,6 +14,7 @@ import (
 	"github.com/aeon022/mailctl/internal/models"
 	"github.com/aeon022/mailctl/internal/store"
 	"github.com/charmbracelet/bubbles/textarea"
+	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -170,11 +171,16 @@ type Model struct {
 	statusTime time.Time
 	err        error
 	syncing    bool
+	sp         spinner.Model
 	aiDrafting bool
 	confirmID  string
 }
 
 func New() Model {
+	sp := spinner.New()
+	sp.Spinner = spinner.MiniDot
+	sp.Style = styleSyncing
+
 	si := textinput.New()
 	si.Placeholder = "search…"
 	si.CharLimit = 200
@@ -198,6 +204,7 @@ func New() Model {
 	body.SetHeight(10)
 
 	return Model{
+		sp:           sp,
 		searchInput:  si,
 		toInput:      to,
 		subjectInput: sub,
@@ -341,6 +348,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case clipboardMsg:
 		// no-op; status already set
 
+	case spinner.TickMsg:
+		if m.syncing || m.aiDrafting {
+			var cmd tea.Cmd
+			m.sp, cmd = m.sp.Update(msg)
+			return m, cmd
+		}
+		return m, nil
+
 	case tea.KeyMsg:
 		m.err = nil
 		if time.Since(m.statusTime) > 4*time.Second {
@@ -466,7 +481,7 @@ func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if !m.syncing {
 			m.syncing = true
 			m.setStatus("Syncing…")
-			return m, syncCmd()
+			return m, tea.Batch(syncCmd(), m.sp.Tick)
 		}
 	case "u":
 		m.unreadOnly = !m.unreadOnly
@@ -573,13 +588,13 @@ func (m Model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.aiDrafting = true
 			m.setStatus("Claude is drafting a reply…")
 			detail := m.detail
-			return m, func() tea.Msg {
+			return m, tea.Batch(m.sp.Tick, func() tea.Msg {
 				body, err := ai.Draft(detail.Subject, detail.Body)
 				if err != nil {
 					return aiDraftErrMsg{err}
 				}
 				return aiDraftMsg{body}
-			}
+			})
 		}
 	}
 	var cmd tea.Cmd
@@ -672,11 +687,11 @@ func (m Model) renderList() string {
 		}
 		bar := strings.Join(parts, "  ")
 		if m.syncing {
-			bar += "  " + styleSyncing.Render("⟳ syncing…")
+			bar += "  " + m.sp.View() + styleSyncing.Render(" syncing…")
 		}
 		b.WriteString(bar + "\n")
 	} else if m.syncing {
-		b.WriteString(styleSyncing.Render("⟳ syncing…") + "\n")
+		b.WriteString(m.sp.View() + styleSyncing.Render(" syncing…") + "\n")
 	} else {
 		b.WriteString("\n")
 	}
@@ -777,7 +792,7 @@ func (m Model) renderDetail() string {
 	}
 	b.WriteString(styleHelp.Render(helpLine))
 	if m.aiDrafting {
-		b.WriteString("\n" + styleSyncing.Render("  ⠋ Claude is drafting a reply…"))
+		b.WriteString("\n  " + m.sp.View() + styleSyncing.Render(" Claude is drafting a reply…"))
 	}
 	return b.String()
 }
