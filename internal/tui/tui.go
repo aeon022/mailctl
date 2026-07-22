@@ -809,11 +809,7 @@ func renderScrollbar(vp viewport.Model) string {
 
 	// no scrollbar needed if content fits
 	if total <= h {
-		var sb strings.Builder
-		for _, l := range lines {
-			sb.WriteString(l + "\n")
-		}
-		return strings.TrimRight(sb.String(), "\n")
+		return content
 	}
 
 	// compute thumb size and position
@@ -821,17 +817,21 @@ func renderScrollbar(vp viewport.Model) string {
 	thumbTop := int(vp.ScrollPercent() * float64(h-thumbH))
 
 	track := styleDivider.Render("│")
-	thumb := styleMeta.Render("█")
+	thumb := lipgloss.NewStyle().Foreground(colorBlue).Render("┃")
 
-	var sb strings.Builder
-	for i, l := range lines {
-		glyph := track
-		if i >= thumbTop && i < thumbTop+thumbH {
-			glyph = thumb
+	var glyphs strings.Builder
+	for i := range lines {
+		if i > 0 {
+			glyphs.WriteByte('\n')
 		}
-		sb.WriteString(l + " " + glyph + "\n")
+		if i >= thumbTop && i < thumbTop+thumbH {
+			glyphs.WriteString(thumb)
+		} else {
+			glyphs.WriteString(track)
+		}
 	}
-	return strings.TrimRight(sb.String(), "\n")
+
+	return lipgloss.JoinHorizontal(lipgloss.Top, content, " "+glyphs.String())
 }
 
 func (m Model) renderCompose() string {
@@ -1202,8 +1202,23 @@ func formatListRow(msg *models.Message, width int, showAcct bool) string {
 	return dot + "  " + dateStyled + "  " + fromStyled + "  " + acctBadge + subject
 }
 
+// stripVariationSelectors removes U+FE0E/U+FE0F. Real email bodies
+// occasionally contain emoji+variation-selector sequences (e.g. "🏖️"),
+// and terminal width libraries disagree on how wide those render — the
+// same disagreement that misaligned notectl's scrollbar. Stripping the
+// selector removes the disagreement at its source instead of trying to
+// reconcile width functions.
+func stripVariationSelectors(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r == '\uFE0E' || r == '\uFE0F' {
+			return -1
+		}
+		return r
+	}, s)
+}
+
 func formatDetail(msg *models.Message, width int) string {
-	body := strings.TrimSpace(msg.Body)
+	body := stripVariationSelectors(strings.TrimSpace(msg.Body))
 	if body == "" {
 		return styleMeta.Render("(no body)")
 	}
