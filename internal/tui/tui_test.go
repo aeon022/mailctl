@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/bubbles/viewport"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	runewidth "github.com/mattn/go-runewidth"
 )
@@ -73,5 +74,42 @@ func TestStripVariationSelectorsAgreeOnWidth(t *testing.T) {
 	}
 	if lipgloss.Width(got) != runewidth.StringWidth(got) {
 		t.Errorf("after stripping, lipgloss.Width(%q)=%d and runewidth.StringWidth=%d should agree, but don't", got, lipgloss.Width(got), runewidth.StringWidth(got))
+	}
+}
+
+func TestHelpOverlay_OpenScrollClose(t *testing.T) {
+	m := Model{width: 100, height: 30}
+
+	mi, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")})
+	m = mi.(Model)
+	if m.view != viewHelp {
+		t.Fatalf("expected viewHelp after '?', got %v", m.view)
+	}
+	if m.helpVP.TotalLineCount() == 0 {
+		t.Fatal("expected help content to be populated")
+	}
+
+	before := m.helpVP.ScrollPercent()
+	for i := 0; i < 5; i++ {
+		mi, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+		m = mi.(Model)
+	}
+	if m.helpVP.ScrollPercent() <= before {
+		t.Errorf("expected scroll to advance after pressing j, stayed at %v", before)
+	}
+
+	mi, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = mi.(Model)
+	if m.view != viewList {
+		t.Errorf("expected esc to close help back to viewList, got %v", m.view)
+	}
+}
+
+func TestHelpOverlay_FitsWithinBackgroundHeight(t *testing.T) {
+	m := Model{width: 100, height: 30}
+	m = m.openHelp()
+	bgLines := len(strings.Split(m.renderList(), "\n"))
+	if m.helpPopH > bgLines {
+		t.Errorf("popup height %d exceeds background height %d", m.helpPopH, bgLines)
 	}
 }

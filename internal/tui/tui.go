@@ -13,9 +13,10 @@ import (
 	"github.com/aeon022/mailctl/internal/mail"
 	"github.com/aeon022/mailctl/internal/models"
 	"github.com/aeon022/mailctl/internal/store"
+	"github.com/aeon022/missionctl-core/overlay"
 	"github.com/aeon022/missionctl-core/theme"
-	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -30,6 +31,7 @@ const (
 	viewList    view = iota
 	viewDetail  view = iota
 	viewCompose view = iota
+	viewHelp    view = iota
 )
 
 const (
@@ -43,12 +45,12 @@ const (
 
 var (
 	// palette — shared across the suite via missionctl-core/theme.
-	colorBlue    = theme.Blue
-	colorGreen   = theme.Green
-	colorRed     = theme.Red
-	colorMuted   = theme.Muted
-	colorSubtle  = theme.Subtle
-	colorTabBg   = lipgloss.AdaptiveColor{Light: "252", Dark: "235"} // inactive tab bg
+	colorBlue   = theme.Blue
+	colorGreen  = theme.Green
+	colorRed    = theme.Red
+	colorMuted  = theme.Muted
+	colorSubtle = theme.Subtle
+	colorTabBg  = lipgloss.AdaptiveColor{Light: "252", Dark: "235"} // inactive tab bg
 
 	// tab bar
 	styleTabActive = lipgloss.NewStyle().
@@ -62,15 +64,15 @@ var (
 			Padding(0, 3)
 
 	// list
-	styleDivider   = lipgloss.NewStyle().Foreground(colorSubtle)
-	styleUnread    = lipgloss.NewStyle().Bold(true)
-	styleRead      = lipgloss.NewStyle().Foreground(colorMuted)
-	styleSelected  = lipgloss.NewStyle().
-				Background(theme.SelectedBg).
-				Foreground(theme.SelectedFg).
-				Bold(true)
+	styleDivider  = lipgloss.NewStyle().Foreground(colorSubtle)
+	styleUnread   = lipgloss.NewStyle().Bold(true)
+	styleRead     = lipgloss.NewStyle().Foreground(colorMuted)
+	styleSelected = lipgloss.NewStyle().
+			Background(theme.SelectedBg).
+			Foreground(theme.SelectedFg).
+			Bold(true)
 	styleAcctBadge = lipgloss.NewStyle().
-				Foreground(lipgloss.AdaptiveColor{Light: "25", Dark: "75"})
+			Foreground(lipgloss.AdaptiveColor{Light: "25", Dark: "75"})
 
 	// detail / compose
 	styleHeader  = lipgloss.NewStyle().Bold(true).Foreground(colorBlue)
@@ -79,10 +81,10 @@ var (
 	styleLabel   = lipgloss.NewStyle().Foreground(colorBlue).Width(9)
 
 	// status
-	styleHelp    = lipgloss.NewStyle().Foreground(colorMuted)
-	styleErr     = lipgloss.NewStyle().Foreground(colorRed)
-	styleOK      = lipgloss.NewStyle().Foreground(colorGreen)
-	styleSyncing = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "214", Dark: "220"})
+	styleHelp      = lipgloss.NewStyle().Foreground(colorMuted)
+	styleErr       = lipgloss.NewStyle().Foreground(colorRed)
+	styleOK        = lipgloss.NewStyle().Foreground(colorGreen)
+	styleSyncing   = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "214", Dark: "220"})
 	styleToday     = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "214", Dark: "220"}).Bold(true)
 	styleDateWeek  = lipgloss.NewStyle().Foreground(colorMuted)
 	styleDateMonth = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "247", Dark: "242"})
@@ -92,14 +94,14 @@ var (
 // senderPalette: 8 distinct colors, avoid red/green (used for status).
 // Pad sender name BEFORE applying color so ANSI codes don't break width math.
 var senderPalette = []lipgloss.AdaptiveColor{
-	{Light: "25",  Dark: "39"},  // blue
-	{Light: "91",  Dark: "135"}, // purple
-	{Light: "30",  Dark: "43"},  // teal
+	{Light: "25", Dark: "39"},   // blue
+	{Light: "91", Dark: "135"},  // purple
+	{Light: "30", Dark: "43"},   // teal
 	{Light: "130", Dark: "173"}, // orange
-	{Light: "23",  Dark: "44"},  // dark cyan
+	{Light: "23", Dark: "44"},   // dark cyan
 	{Light: "125", Dark: "168"}, // magenta
-	{Light: "58",  Dark: "136"}, // gold
-	{Light: "17",  Dark: "69"},  // navy
+	{Light: "58", Dark: "136"},  // gold
+	{Light: "17", Dark: "69"},   // navy
 }
 
 func senderStyle(from string) lipgloss.Style {
@@ -143,16 +145,16 @@ type Model struct {
 	height int
 
 	// list
-	msgs       []models.Message
-	cursor     int
-	unreadOnly bool
-	searchQ    string
-	searching  bool
+	msgs        []models.Message
+	cursor      int
+	unreadOnly  bool
+	searchQ     string
+	searching   bool
 	searchInput textinput.Model
 
 	// tabs
-	accounts     []string     // ["Alle", "iCloud", ...]
-	activeTab    int          // 0 = Alle
+	accounts     []string // ["Alle", "iCloud", ...]
+	activeTab    int      // 0 = Alle
 	unreadCounts map[string]int
 
 	// detail
@@ -176,6 +178,11 @@ type Model struct {
 	aiDrafting bool
 	confirmID  string
 	loading    bool
+
+	// "?" transient help popup
+	helpVP   viewport.Model
+	helpPopW int
+	helpPopH int
 }
 
 func New() Model {
@@ -372,6 +379,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateDetail(msg)
 		case viewCompose:
 			return m.updateCompose(msg)
+		case viewHelp:
+			switch msg.String() {
+			case "ctrl+c":
+				return m, tea.Quit
+			case "q", "esc", "?":
+				m.view = viewList
+				return m, nil
+			}
+			var cmd tea.Cmd
+			m.helpVP, cmd = m.helpVP.Update(msg)
+			return m, cmd
 		}
 	}
 
@@ -495,6 +513,8 @@ func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.searching = true
 		m.searchInput.Focus()
 		m.searchInput.SetValue("")
+	case "?":
+		m = m.openHelp()
 	case "esc":
 		if m.confirmID != "" {
 			m.confirmID = ""
@@ -653,9 +673,81 @@ func (m Model) View() string {
 		return m.renderDetail()
 	case viewCompose:
 		return m.renderCompose()
+	case viewHelp:
+		// "?" is only reachable from the main list, so the list is always
+		// the correct background to keep visible behind the popup. No
+		// enclosing border on the list view, so inset 0 is safe.
+		return overlay.Center(m.renderList(), m.renderHelpPopup(), m.width, m.height, 0)
 	default:
 		return m.renderList()
 	}
+}
+
+func (m Model) helpContent() string {
+	key := func(k string) string { return styleHeader.Render(fmt.Sprintf("%-11s", k)) }
+	row := func(k, desc string) string { return "  " + key(k) + styleMeta.Render(desc) + "\n" }
+	section := func(t string) string { return "\n  " + styleHeader.Render(t) + "\n" }
+
+	var b strings.Builder
+	b.WriteString(section("Navigation"))
+	b.WriteString(row("j / k", "move down / up"))
+	b.WriteString(row("g / G", "jump to top / bottom"))
+	b.WriteString(row("pgdn/pgup", "page down / up"))
+	b.WriteString(row("tab", "next account"))
+	b.WriteString(row("shift+tab", "previous account"))
+	b.WriteString(section("Messages"))
+	b.WriteString(row("enter", "open message"))
+	b.WriteString(row("n", "new message"))
+	b.WriteString(row("o", "open in Mail.app"))
+	b.WriteString(row("d", "delete (asks to confirm)"))
+	b.WriteString(row("y", "copy subject + sender to clipboard"))
+	b.WriteString(section("Other"))
+	b.WriteString(row("u", "toggle unread-only filter"))
+	b.WriteString(row("s", "sync"))
+	b.WriteString(row("/", "search (esc clears)"))
+	b.WriteString(row("?", "toggle this help"))
+	b.WriteString(row("q", "quit"))
+	return b.String()
+}
+
+// openHelp sizes and populates the transient help popup (see
+// renderHelpPopup/overlay.Center) from the ACTUAL rendered background
+// height, not the terminal size.
+func (m Model) openHelp() Model {
+	bgLines := strings.Split(m.renderList(), "\n")
+
+	safeH := max(6, len(bgLines))
+	popH := min(safeH, 22)
+	popW := min(70, m.width)
+	if popW < 40 {
+		popW = 40
+	}
+
+	vp := viewport.New(popW-6, popH-5) // border 1+1, padding(1,2) → 2 rows/4 cols; -1 row for footer
+	vp.SetContent(m.helpContent())
+
+	m.helpVP = vp
+	m.helpPopW = popW
+	m.helpPopH = popH
+	m.view = viewHelp
+	return m
+}
+
+// renderHelpPopup renders the help viewport in a bordered box, meant to be
+// composited over the list view via overlay.Center rather than replacing
+// the whole screen — the list stays visible around it.
+func (m Model) renderHelpPopup() string {
+	footer := "esc / ?  close"
+	if m.helpVP.TotalLineCount() > m.helpVP.Height {
+		footer = fmt.Sprintf("j/k scroll (%d%%)  ·  %s", int(m.helpVP.ScrollPercent()*100), footer)
+	}
+	body := m.helpVP.View() + "\n" + styleMeta.Render(footer)
+	return lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(colorBlue).
+		Padding(1, 2).
+		Width(m.helpPopW).
+		Render(body)
 }
 
 func (m Model) renderList() string {
@@ -755,7 +847,7 @@ func (m Model) renderList() string {
 	} else if m.status != "" {
 		helpBar = styleOK.Render("✓ " + m.status)
 	} else {
-		helpBar = styleHelp.Render("enter:open  n:new  s:sync  u:unread  d:delete  y:copy  o:mail  /:search  tab:acct  q:quit")
+		helpBar = styleHelp.Render("enter:open  n:new  s:sync  u:unread  d:delete  y:copy  o:mail  /:search  tab:acct  ?:help  q:quit")
 	}
 	rightPad := w - lipgloss.Width(helpBar) - lipgloss.Width(countStr)
 	if rightPad < 0 {
@@ -864,7 +956,7 @@ func (m Model) renderCompose() string {
 	b.WriteString(m.bodyArea.View() + "\n\n")
 
 	if m.err != nil {
-		b.WriteString(styleErr.Render("✗ " + m.err.Error()) + "\n")
+		b.WriteString(styleErr.Render("✗ "+m.err.Error()) + "\n")
 	} else {
 		b.WriteString(styleHelp.Render("tab:next  ctrl+s:send  ctrl+d:draft  esc:cancel  attach:comma-sep paths"))
 	}
@@ -1182,7 +1274,7 @@ func formatListRow(msg *models.Message, width int, showAcct bool) string {
 	fromStyled := senderStyle(msg.From).Render(fromPadded)
 
 	// ── account badge (only in Alle tab, always 12 chars wide: [xxxxxxxx]·· ) ──
-	const badgeInner = 8 // fixed visual width of text inside brackets
+	const badgeInner = 8                  // fixed visual width of text inside brackets
 	const badgeTotal = badgeInner + 2 + 2 // "[" + inner + "]" + "  "
 	acctBadge := ""
 	acctW := 0
