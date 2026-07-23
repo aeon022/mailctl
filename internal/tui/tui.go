@@ -175,6 +175,7 @@ type Model struct {
 	sp         spinner.Model
 	aiDrafting bool
 	confirmID  string
+	loading    bool
 }
 
 func New() Model {
@@ -211,6 +212,7 @@ func New() Model {
 		subjectInput: sub,
 		attachInput:  att,
 		bodyArea:     body,
+		loading:      true,
 	}
 }
 
@@ -224,7 +226,7 @@ func Run() error {
 // ── Init ──────────────────────────────────────────────────────────────────────
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(loadMsgsCmd(false, "", ""), tea.WindowSize())
+	return tea.Batch(loadMsgsCmd(false, "", ""), tea.WindowSize(), m.sp.Tick)
 }
 
 func (m Model) activeAccount() string {
@@ -247,6 +249,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.bodyArea.SetHeight(m.height - 12)
 
 	case msgsLoadedMsg:
+		m.loading = false
 		m.msgs = msg.msgs
 		if len(msg.accounts) > 0 {
 			m.accounts = append([]string{"Alle"}, msg.accounts...)
@@ -350,7 +353,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// no-op; status already set
 
 	case spinner.TickMsg:
-		if m.syncing || m.aiDrafting {
+		if m.syncing || m.aiDrafting || m.loading {
 			var cmd tea.Cmd
 			m.sp, cmd = m.sp.Update(msg)
 			return m, cmd
@@ -725,7 +728,9 @@ func (m Model) renderList() string {
 		listH = 1
 	}
 
-	if len(m.msgs) == 0 {
+	if m.loading {
+		b.WriteString("\n  " + m.sp.View() + styleHelp.Render(" Loading messages…") + "\n")
+	} else if len(m.msgs) == 0 {
 		b.WriteString("\n" + styleHelp.Render("  No messages — press s to sync") + "\n")
 	} else {
 		lines, cursorLine := m.buildListLines(w)
