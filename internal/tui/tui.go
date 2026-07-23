@@ -13,6 +13,7 @@ import (
 	"github.com/aeon022/mailctl/internal/mail"
 	"github.com/aeon022/mailctl/internal/models"
 	"github.com/aeon022/mailctl/internal/store"
+	"github.com/aeon022/missionctl-core/theme"
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -41,12 +42,12 @@ const (
 // ── Styles ────────────────────────────────────────────────────────────────────
 
 var (
-	// palette
-	colorBlue    = lipgloss.AdaptiveColor{Light: "25",  Dark: "33"}
-	colorGreen   = lipgloss.AdaptiveColor{Light: "28",  Dark: "42"}
-	colorRed     = lipgloss.AdaptiveColor{Light: "160", Dark: "203"}
-	colorMuted   = lipgloss.AdaptiveColor{Light: "243", Dark: "246"} // readable on both bg
-	colorSubtle  = lipgloss.AdaptiveColor{Light: "250", Dark: "244"}
+	// palette — shared across the suite via missionctl-core/theme.
+	colorBlue    = theme.Blue
+	colorGreen   = theme.Green
+	colorRed     = theme.Red
+	colorMuted   = theme.Muted
+	colorSubtle  = theme.Subtle
 	colorTabBg   = lipgloss.AdaptiveColor{Light: "252", Dark: "235"} // inactive tab bg
 
 	// tab bar
@@ -65,8 +66,8 @@ var (
 	styleUnread    = lipgloss.NewStyle().Bold(true)
 	styleRead      = lipgloss.NewStyle().Foreground(colorMuted)
 	styleSelected  = lipgloss.NewStyle().
-				Background(lipgloss.AdaptiveColor{Light: "189", Dark: "17"}).
-				Foreground(lipgloss.AdaptiveColor{Light: "16",  Dark: "255"}).
+				Background(theme.SelectedBg).
+				Foreground(theme.SelectedFg).
 				Bold(true)
 	styleAcctBadge = lipgloss.NewStyle().
 				Foreground(lipgloss.AdaptiveColor{Light: "25", Dark: "75"})
