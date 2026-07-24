@@ -21,6 +21,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/sahilm/fuzzy"
 )
 
 // ── Views ─────────────────────────────────────────────────────────────────────
@@ -50,6 +51,7 @@ var (
 	colorRed    = theme.Red
 	colorMuted  = theme.Muted
 	colorSubtle = theme.Subtle
+	colorAmber  = theme.Amber
 	colorTabBg  = lipgloss.AdaptiveColor{Light: "252", Dark: "235"} // inactive tab bg
 
 	// tab bar
@@ -145,7 +147,8 @@ type Model struct {
 	height int
 
 	// list
-	msgs        []models.Message
+	msgs        []models.Message // filtered (by searchQ) view of allMsgs
+	allMsgs     []models.Message // everything loaded for the current unread/account scope
 	cursor      int
 	unreadOnly  bool
 	searchQ     string
@@ -233,7 +236,7 @@ func Run() error {
 // ── Init ──────────────────────────────────────────────────────────────────────
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(loadMsgsCmd(false, "", ""), tea.WindowSize(), m.sp.Tick)
+	return tea.Batch(loadMsgsCmd(false, ""), tea.WindowSize(), m.sp.Tick)
 }
 
 func (m Model) activeAccount() string {
@@ -257,7 +260,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case msgsLoadedMsg:
 		m.loading = false
-		m.msgs = msg.msgs
+		m.allMsgs = msg.msgs
+		m.msgs = filterMsgs(m.allMsgs, m.searchQ)
 		if len(msg.accounts) > 0 {
 			m.accounts = append([]string{"Alle"}, msg.accounts...)
 		}
@@ -278,7 +282,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.setStatus(fmt.Sprintf("Synced %d messages", msg.count))
 			// reload with active account filter to preserve tab
-			return m, loadMsgsCmd(m.unreadOnly, m.searchQ, m.activeAccount())
+			return m, loadMsgsCmd(m.unreadOnly, m.activeAccount())
 		}
 
 	case bodyLoadedMsg:
@@ -406,17 +410,22 @@ func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.searching {
 		switch msg.String() {
 		case "enter":
-			m.searchQ = m.searchInput.Value()
+			// Filtering already happened live as the user typed (below) —
+			// enter just closes the input box, no DB round-trip needed.
 			m.searching = false
 			m.cursor = 0
-			return m, loadMsgsCmd(m.unreadOnly, m.searchQ, m.activeAccount())
 		case "esc":
 			m.searching = false
 			m.searchInput.SetValue("")
 			m.searchQ = ""
+			m.cursor = 0
+			m.msgs = filterMsgs(m.allMsgs, "")
 		default:
 			var cmd tea.Cmd
 			m.searchInput, cmd = m.searchInput.Update(msg)
+			m.searchQ = m.searchInput.Value()
+			m.cursor = 0
+			m.msgs = filterMsgs(m.allMsgs, m.searchQ)
 			return m, cmd
 		}
 		return m, nil
@@ -429,13 +438,13 @@ func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if len(m.accounts) > 0 {
 			m.activeTab = (m.activeTab + 1) % len(m.accounts)
 			m.cursor = 0
-			return m, loadMsgsCmd(m.unreadOnly, m.searchQ, m.activeAccount())
+			return m, loadMsgsCmd(m.unreadOnly, m.activeAccount())
 		}
 	case "shift+tab":
 		if len(m.accounts) > 0 {
 			m.activeTab = (m.activeTab - 1 + len(m.accounts)) % len(m.accounts)
 			m.cursor = 0
-			return m, loadMsgsCmd(m.unreadOnly, m.searchQ, m.activeAccount())
+			return m, loadMsgsCmd(m.unreadOnly, m.activeAccount())
 		}
 	case "j", "down":
 		if m.cursor < len(m.msgs)-1 {
@@ -508,7 +517,7 @@ func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "u":
 		m.unreadOnly = !m.unreadOnly
 		m.cursor = 0
-		return m, loadMsgsCmd(m.unreadOnly, m.searchQ, m.activeAccount())
+		return m, loadMsgsCmd(m.unreadOnly, m.activeAccount())
 	case "/":
 		m.searching = true
 		m.searchInput.Focus()
@@ -525,7 +534,7 @@ func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.searchQ = ""
 			m.searchInput.SetValue("")
 			m.cursor = 0
-			return m, loadMsgsCmd(m.unreadOnly, "", m.activeAccount())
+			m.msgs = filterMsgs(m.allMsgs, "")
 		}
 	}
 	return m, nil
@@ -965,7 +974,13 @@ func (m Model) renderCompose() string {
 
 // ── Commands ──────────────────────────────────────────────────────────────────
 
-func loadMsgsCmd(unreadOnly bool, query, account string) tea.Cmd {
+// loadMsgsCmd fetches messages for account/unreadOnly, unfiltered by search
+// text — search is applied client-side (filterMsgs) over the result, live
+// as the user types, rather than round-tripping to SQLite on every
+// keystroke or requiring enter to submit. Store.Filter.Query / the SQL LIKE
+// path still exists and is still used by `mailctl search` and the MCP
+// search tool, just not from here anymore.
+func loadMsgsCmd(unreadOnly bool, account string) tea.Cmd {
 	return func() tea.Msg {
 		s, err := store.New(config.DBPath())
 		if err != nil {
@@ -976,7 +991,6 @@ func loadMsgsCmd(unreadOnly bool, query, account string) tea.Cmd {
 		msgs, err := s.ListMessages(ctx, store.Filter{
 			Account:    account,
 			UnreadOnly: unreadOnly,
-			Query:      query,
 			Limit:      500,
 		})
 		if err != nil {
@@ -986,6 +1000,37 @@ func loadMsgsCmd(unreadOnly bool, query, account string) tea.Cmd {
 		counts, _ := s.UnreadCounts(ctx)
 		return msgsLoadedMsg{msgs: msgs, accounts: accounts, unreadCounts: counts}
 	}
+}
+
+// filterMsgs fuzzy-matches q against each message's subject OR from
+// (github.com/sahilm/fuzzy), keeping a message if either matches. Does NOT
+// re-rank by match quality — messages are naturally date-ordered (grouped
+// by day in the list), and re-sorting by fuzzy score would scramble that.
+func filterMsgs(msgs []models.Message, q string) []models.Message {
+	q = strings.TrimSpace(q)
+	if q == "" {
+		return msgs
+	}
+	subjects := make([]string, len(msgs))
+	froms := make([]string, len(msgs))
+	for i, m := range msgs {
+		subjects[i] = m.Subject
+		froms[i] = m.From
+	}
+	matched := make(map[int]bool, len(msgs))
+	for _, mt := range fuzzy.Find(q, subjects) {
+		matched[mt.Index] = true
+	}
+	for _, mt := range fuzzy.Find(q, froms) {
+		matched[mt.Index] = true
+	}
+	out := make([]models.Message, 0, len(matched))
+	for i, m := range msgs {
+		if matched[i] {
+			out = append(out, m)
+		}
+	}
+	return out
 }
 
 func syncCmd() tea.Cmd {
@@ -1174,16 +1219,16 @@ func (m Model) buildListLines(w int) ([]string, int) {
 		}
 
 		// main row
-		row := formatListRow(msg, w, showAcct)
+		var rowStyle lipgloss.Style
 		switch {
 		case i == m.cursor:
-			row = styleSelected.Width(w).Render(row)
+			rowStyle = styleSelected
 		case !msg.Read:
-			row = styleUnread.Render(row)
+			rowStyle = styleUnread
 		default:
-			row = styleRead.Render(row)
+			rowStyle = styleRead
 		}
-		lines = append(lines, row)
+		lines = append(lines, formatListRow(msg, w, showAcct, rowStyle, m.searchQ))
 
 		// body preview (only when body is available)
 		if preview := formatPreview(msg, w, showAcct); preview != "" {
@@ -1251,27 +1296,40 @@ func formatPreview(msg *models.Message, width int, showAcct bool) string {
 	return strings.Repeat(" ", indent) + preview
 }
 
-func formatListRow(msg *models.Message, width int, showAcct bool) string {
+// formatListRow builds a message list row. rowStyle carries the read/
+// unread/selected treatment (background+foreground+bold as appropriate)
+// and is applied directly to every plain segment (dot, spacing, subject) —
+// NOT via an outer Render() wrapping the whole composed string. That used
+// to be how this worked (buildListLines wrapped the return value in
+// styleRead/styleUnread/styleSelected.Render()), and it was broken:
+// dateStyled/fromStyled below carry their OWN independent colors, and
+// lipgloss's Render() ends every string with a full SGR reset — the FIRST
+// inner segment's reset silently clobbered the outer wrap's style for
+// everything after it. Confirmed empirically with a forced ANSI profile:
+// the subject text (and the selected row's background) lost its intended
+// styling entirely past the "from" column. Fixed by applying rowStyle
+// per-segment instead, which also makes it safe to highlight fuzzy matches
+// here even on the selected row (no outer wrap left to clobber).
+func formatListRow(msg *models.Message, width int, showAcct bool, rowStyle lipgloss.Style, query string) string {
 	dot := "○"
 	if !msg.Read {
 		dot = "●"
 	}
 
-	// ── date column (14 chars, pad BEFORE styling) ──
+	// ── date column (14 chars, pad BEFORE styling) — independently
+	// colored by recency, unaffected by read/unread/selected state ──
 	dateRaw := smartDate(msg.Date)
 	datePadded := fmt.Sprintf("%-14s", dateRaw)
 	dateStyled := coloredDate(datePadded, msg.Date)
 
-	// ── from column (20 chars, pad BEFORE styling) ──
+	// ── from column (20 chars, pad BEFORE styling) — independently
+	// colored per sender, unaffected by read/unread/selected state ──
 	from := msg.From
 	if idx := strings.Index(from, "<"); idx > 0 {
 		from = strings.TrimSpace(from[:idx])
 	}
-	if len(from) > 20 {
-		from = from[:19] + "…"
-	}
-	fromPadded := fmt.Sprintf("%-20s", from)
-	fromStyled := senderStyle(msg.From).Render(fromPadded)
+	from = truncRunes(from, 20)
+	fromStyled := senderStyle(msg.From).Render(padRunes(from, 20))
 
 	// ── account badge (only in Alle tab, always 12 chars wide: [xxxxxxxx]·· ) ──
 	const badgeInner = 8                  // fixed visual width of text inside brackets
@@ -1279,25 +1337,30 @@ func formatListRow(msg *models.Message, width int, showAcct bool) string {
 	acctBadge := ""
 	acctW := 0
 	if showAcct && msg.Account != "" {
-		inner := runeLimit(acctShort(msg.Account), badgeInner)
-		inner = inner + strings.Repeat(" ", badgeInner-lipgloss.Width(inner)) // pad to 8
-		acctBadge = styleAcctBadge.Render("["+inner+"]") + "  "
+		inner := padRunes(runeLimit(acctShort(msg.Account), badgeInner), badgeInner)
+		acctBadge = styleAcctBadge.Render("["+inner+"]") + rowStyle.Render("  ")
 		acctW = badgeTotal
 	}
 
-	// ── subject: fill remaining width ──
+	// ── subject: fill remaining width, fuzzy-highlighted ──
 	// dot(1) + 2 + date(14) + 2 + from(20) + 2 + acctW + subject
 	fixed := 1 + 2 + 14 + 2 + 20 + 2 + acctW
 	subjectW := width - fixed
 	if subjectW < 10 {
 		subjectW = 10
 	}
-	subject := msg.Subject
-	if len(subject) > subjectW {
-		subject = subject[:subjectW-1] + "…"
-	}
+	matchIdx := fuzzyMatchIndexes(query, msg.Subject)
+	subject := highlightMatches(truncRunes(msg.Subject, subjectW), matchIdx, rowStyle)
 
-	return dot + "  " + dateStyled + "  " + fromStyled + "  " + acctBadge + subject
+	row := rowStyle.Render(dot) + rowStyle.Render("  ") + dateStyled + rowStyle.Render("  ") +
+		fromStyled + rowStyle.Render("  ") + acctBadge + subject
+
+	// Pad to full width with rowStyle so a selected row's background spans
+	// the whole line, not just up to the last character of content.
+	if pad := width - lipgloss.Width(row); pad > 0 {
+		row += rowStyle.Render(strings.Repeat(" ", pad))
+	}
+	return row
 }
 
 // stripVariationSelectors removes U+FE0E/U+FE0F. Real email bodies
@@ -1411,6 +1474,74 @@ func acctShort(name string) string {
 }
 
 // runeLimit truncates s to at most n visible characters (rune-aware).
+// truncRunes truncates s to at most n runes, appending "…" if it had to cut
+// (the ellipsis itself counts toward n). Rune-safe, unlike raw byte slicing.
+func truncRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	if n <= 1 {
+		return "…"
+	}
+	return string(r[:n-1]) + "…"
+}
+
+// padRunes right-pads s with spaces to n runes. Assumes s already fits
+// within n runes (callers truncate first); no-ops otherwise.
+func padRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) >= n {
+		return s
+	}
+	return s + strings.Repeat(" ", n-len(r))
+}
+
+// fuzzyMatchIndexes returns the rune indexes within s that q fuzzy-matched,
+// or nil if q is empty or doesn't match at all.
+func fuzzyMatchIndexes(q, s string) []int {
+	if q == "" {
+		return nil
+	}
+	matches := fuzzy.Find(q, []string{s})
+	if len(matches) == 0 {
+		return nil
+	}
+	return matches[0].MatchedIndexes
+}
+
+// highlightMatches renders s with the rune positions in idxs (from
+// fuzzyMatchIndexes) styled via a warm, underlined variant of base, and
+// every other character via base itself — fzf-style match highlighting.
+//
+// Renders one character at a time rather than nesting a highlighted span
+// inside a single outer Render() call: lipgloss's Render() ends every
+// string with a full SGR reset, so an inner Render() call's reset would
+// wipe out the outer style for everything after the first highlighted
+// character. Per-character rendering keeps every segment self-contained.
+//
+// idxs are indexes into s BEFORE any truncation — callers must resolve
+// indexes against the same, untruncated string used to compute them.
+func highlightMatches(s string, idxs []int, base lipgloss.Style) string {
+	if len(idxs) == 0 {
+		return base.Render(s)
+	}
+	hi := base.Foreground(colorAmber).Underline(true)
+	matchSet := make(map[int]bool, len(idxs))
+	for _, i := range idxs {
+		matchSet[i] = true
+	}
+	var b strings.Builder
+	for i, r := range []rune(s) {
+		if matchSet[i] {
+			b.WriteString(hi.Render(string(r)))
+		} else {
+			b.WriteString(base.Render(string(r)))
+		}
+	}
+	return b.String()
+}
+
 func runeLimit(s string, n int) string {
 	runes := []rune(s)
 	if len(runes) <= n {
