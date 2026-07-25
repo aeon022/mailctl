@@ -357,6 +357,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else if m.cursor < len(m.msgs)-1 {
 				m.cursor++
 			}
+		case tea.MouseButtonLeft:
+			if msg.Action != tea.MouseActionPress || m.view != viewList {
+				return m, nil
+			}
+			if i := m.tabHitTest(msg.X, msg.Y); i >= 0 {
+				if i != m.activeTab {
+					m.activeTab = i
+					m.cursor = 0
+					return m, loadMsgsCmd(m.unreadOnly, m.activeAccount())
+				}
+				return m, nil
+			}
+			if i := m.rowHitTest(msg.Y); i >= 0 {
+				m.cursor = i
+			}
 		}
 		return m, nil
 
@@ -803,8 +818,6 @@ func (m Model) renderList() string {
 	b.WriteString(styleDivider.Render(strings.Repeat("─", w)) + "\n")
 
 	// ── filter chips ──
-	// overhead: header(1) + tab(1) + divider(1) + statusbar(2) = 5
-	overhead := 5
 	if m.unreadOnly || m.searchQ != "" {
 		var chips []string
 		if m.unreadOnly {
@@ -814,17 +827,15 @@ func (m Model) renderList() string {
 			chips = append(chips, styleTabInact.Render("/"+m.searchQ))
 		}
 		b.WriteString(strings.Join(chips, "  ") + "\n")
-		overhead++
 	}
 
 	// ── search input ──
 	if m.searching {
 		b.WriteString("  " + m.searchInput.View() + "\n\n")
-		overhead += 2
 	}
 
 	// ── message list ──
-	listH := m.height - overhead
+	listH := m.height - m.listStartY() - 2 // statusbar
 	if listH < 1 {
 		listH = 1
 	}
@@ -1199,8 +1210,18 @@ func (m Model) detailBodyHeight() int {
 // buildListLines pre-renders all message rows (with date group headers and body
 // previews) and returns them as a flat string slice plus the visual index of cursor.
 func (m Model) buildListLines(w int) ([]string, int) {
+	lines, cursorLine, _ := m.buildListLinesWithMapping(w)
+	return lines, cursorLine
+}
+
+// buildListLinesWithMapping is buildListLines plus a parallel lineToMsg
+// slice (msg index for a main-row or preview line, -1 for a group-header
+// line), so rowHitTest can map a clicked screen line back to a message
+// without re-deriving this layout itself.
+func (m Model) buildListLinesWithMapping(w int) ([]string, int, []int) {
 	showAcct := m.activeTab == 0
 	var lines []string
+	var lineToMsg []int
 	cursorLine := 0
 	lastGroup := ""
 
@@ -1211,6 +1232,7 @@ func (m Model) buildListLines(w int) ([]string, int) {
 		group := dateGroup(msg.Date)
 		if group != lastGroup {
 			lines = append(lines, renderGroupHeader(group, w))
+			lineToMsg = append(lineToMsg, -1)
 			lastGroup = group
 		}
 
@@ -1229,6 +1251,7 @@ func (m Model) buildListLines(w int) ([]string, int) {
 			rowStyle = styleRead
 		}
 		lines = append(lines, formatListRow(msg, w, showAcct, rowStyle, m.searchQ))
+		lineToMsg = append(lineToMsg, i)
 
 		// body preview (only when body is available)
 		if preview := formatPreview(msg, w, showAcct); preview != "" {
@@ -1238,9 +1261,79 @@ func (m Model) buildListLines(w int) ([]string, int) {
 				preview = styleMeta.Render(preview)
 			}
 			lines = append(lines, preview)
+			lineToMsg = append(lineToMsg, i)
 		}
 	}
-	return lines, cursorLine
+	return lines, cursorLine, lineToMsg
+}
+
+// listStartY returns the number of preamble lines above the message list —
+// header, tab bar, divider, optional filter chips, optional search input —
+// shared by renderList (to size the list) and rowHitTest (to locate it) so
+// the two can't drift apart.
+func (m Model) listStartY() int {
+	y := 3 // header + tab bar + divider
+	if m.unreadOnly || m.searchQ != "" {
+		y++
+	}
+	if m.searching {
+		y += 2
+	}
+	return y
+}
+
+// tabHitTest returns the account-tab index at column x on the tab bar row
+// (row 1: header is row 0), or -1 if the click didn't land on a tab.
+func (m Model) tabHitTest(x, y int) int {
+	if y != 1 || len(m.accounts) == 0 {
+		return -1
+	}
+	col := 0
+	for i, a := range m.accounts {
+		acctKey := a
+		if i == 0 {
+			acctKey = ""
+		}
+		label := a
+		if c := m.unreadCounts[acctKey]; c > 0 {
+			label = fmt.Sprintf("%s ·%d", a, c)
+		}
+		w := lipgloss.Width(styleTabInact.Render(label))
+		if i == m.activeTab {
+			w = lipgloss.Width(styleTabActive.Render(label))
+		}
+		if x >= col && x < col+w {
+			return i
+		}
+		col += w + 2 // "  " join separator
+	}
+	return -1
+}
+
+// rowHitTest returns the message index at screen row y, or -1 if the click
+// landed on a group header, preview-only gap, or outside the list. Mirrors
+// buildListLinesWithMapping's line layout and renderList's scroll window
+// (start := cursorLine - listH + 1 once the cursor scrolls past view).
+func (m Model) rowHitTest(y int) int {
+	idx := y - m.listStartY()
+	if idx < 0 || len(m.msgs) == 0 {
+		return -1
+	}
+	w := min(m.width, 130)
+	_, cursorLine, lineToMsg := m.buildListLinesWithMapping(w)
+	listH := m.height - m.listStartY() - 2
+	if listH < 1 {
+		listH = 1
+	}
+	start := 0
+	if cursorLine >= listH {
+		start = cursorLine - listH + 1
+	}
+	lineIdx := start + idx
+	if lineIdx >= len(lineToMsg) {
+		return -1
+	}
+	return lineToMsg[lineIdx]
 }
 
 func dateGroup(t time.Time) string {
