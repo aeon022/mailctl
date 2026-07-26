@@ -3,7 +3,7 @@ module github.com/aeon022/mailctl
 go 1.26.5
 
 require (
-	github.com/aeon022/missionctl-core v0.0.0-20260723143759-802e78b02d43
+	github.com/aeon022/missionctl-core v0.0.0-20260726074204-fb30297a9593
 	github.com/anthropics/anthropic-sdk-go v1.57.0
 	github.com/charmbracelet/bubbles v1.0.0
 	github.com/charmbracelet/bubbletea v1.3.10
@@ -11,6 +11,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/mark3labs/mcp-go v0.55.1
 	github.com/mattn/go-runewidth v0.0.19
+	github.com/muesli/termenv v0.16.0
 	github.com/sahilm/fuzzy v0.1.1
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
@@ -42,7 +43,6 @@ require (
 	github.com/mattn/go-localereader v0.0.1 // indirect
 	github.com/muesli/ansi v0.0.0-20230316100256-276c6243b2f6 // indirect
 	github.com/muesli/cancelreader v0.2.2 // indirect
-	github.com/muesli/termenv v0.16.0 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/pb33f/ordered-map/v2 v2.3.1 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.4 // indirect

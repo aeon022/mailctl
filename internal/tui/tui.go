@@ -150,6 +150,7 @@ type Model struct {
 	msgs        []models.Message // filtered (by searchQ) view of allMsgs
 	allMsgs     []models.Message // everything loaded for the current unread/account scope
 	cursor      int
+	hoverRow    int // m.msgs index under the mouse cursor, -1 when none
 	unreadOnly  bool
 	searchQ     string
 	searching   bool
@@ -223,12 +224,13 @@ func New() Model {
 		attachInput:  att,
 		bodyArea:     body,
 		loading:      true,
+		hoverRow:     -1,
 	}
 }
 
 func Run() error {
 	m := New()
-	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
+	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseAllMotion())
 	_, err := p.Run()
 	return err
 }
@@ -371,6 +373,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if i := m.rowHitTest(msg.Y); i >= 0 {
 				m.cursor = i
+			}
+		case tea.MouseButtonNone:
+			if msg.Action == tea.MouseActionMotion && m.view == viewList {
+				m.hoverRow = m.rowHitTest(msg.Y)
 			}
 		}
 		return m, nil
@@ -1245,6 +1251,8 @@ func (m Model) buildListLinesWithMapping(w int) ([]string, int, []int) {
 		switch {
 		case i == m.cursor:
 			rowStyle = styleSelected
+		case i == m.hoverRow:
+			rowStyle = theme.Hover
 		case !msg.Read:
 			rowStyle = styleUnread
 		default:
@@ -1255,9 +1263,12 @@ func (m Model) buildListLinesWithMapping(w int) ([]string, int, []int) {
 
 		// body preview (only when body is available)
 		if preview := formatPreview(msg, w, showAcct); preview != "" {
-			if i == m.cursor {
+			switch {
+			case i == m.cursor:
 				preview = styleSelected.Width(w).Render(preview)
-			} else {
+			case i == m.hoverRow:
+				preview = theme.Hover.Width(w).Render(preview)
+			default:
 				preview = styleMeta.Render(preview)
 			}
 			lines = append(lines, preview)
