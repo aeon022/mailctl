@@ -257,7 +257,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.vp = viewport.New(msg.Width, m.detailBodyHeight())
+		// Match the width/height renderDetail actually displays with (see
+		// detailRawWidth/detailBodyHeight) — this is what PgUp/PgDown
+		// scroll by via vp.Update(), so it has to agree with what's really
+		// on screen or scrolling overshoots what the viewport shows per page.
+		m.vp = viewport.New(m.detailRawWidth()-2, m.detailBodyHeight())
 		m.bodyArea.SetWidth(msg.Width - 12)
 		m.bodyArea.SetHeight(m.height - 12)
 
@@ -293,7 +297,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = msg.err
 		} else if m.detail != nil {
 			m.detail.Body = msg.body
-			m.vp.SetContent(formatDetail(m.detail, m.width))
+			m.vp.SetContent(formatDetail(m.detail, m.detailRawWidth()))
 		}
 
 	case readMarkedMsg:
@@ -897,12 +901,24 @@ func (m Model) renderList() string {
 // scrollbar — already accounts for the smaller canvas.
 const detailPadV, detailPadH = 1, 2
 
+// detailRawWidth is the width renderDetail actually lays out with, after
+// the outer padding and the 1-column terminal-edge safety margin (see
+// renderDetail) — but BEFORE the further -2 for the scrollbar track that
+// both renderDetail (via w-2) and formatDetail (via width-2) apply
+// themselves. bodyLoadedMsg must wrap the fetched body to this same value,
+// not the raw terminal width — wrapping wider than the viewport actually
+// displays cut lines at the wrong point once rendered, visually corrupting
+// the scrollbar's glyph column exactly where a wrapped line happened to be
+// too wide for the real display area.
+func (m Model) detailRawWidth() int {
+	return m.width - detailPadH*2 - 1
+}
+
 func (m Model) renderDetail() string {
 	if m.detail == nil {
 		return ""
 	}
-	m.width -= detailPadH * 2
-	m.height -= detailPadV * 2
+	m.width = m.detailRawWidth()
 	w := min(m.width, 130)
 	var b strings.Builder
 
@@ -958,19 +974,31 @@ func renderScrollbar(vp viewport.Model) string {
 	track := styleDivider.Render("│")
 	thumb := lipgloss.NewStyle().Foreground(colorBlue).Render("┃")
 
-	var glyphs strings.Builder
-	for i := range lines {
+	// Pad each line out to vp.Width explicitly rather than relying on
+	// lipgloss.JoinHorizontal, which pads to the widest line ACTUALLY
+	// present in the content rather than the viewport's declared width.
+	// A line that happens to reach exactly that actual-widest width gets
+	// its glyph glued on with no gap — the padding lipgloss would have
+	// added assumes there's slack to add, and there isn't when this line
+	// IS the widest one. Padding against the width we set ourselves
+	// removes that ambiguity entirely.
+	var b strings.Builder
+	for i, l := range lines {
 		if i > 0 {
-			glyphs.WriteByte('\n')
+			b.WriteByte('\n')
 		}
+		if lw := lipgloss.Width(l); lw < vp.Width {
+			l += strings.Repeat(" ", vp.Width-lw)
+		}
+		b.WriteString(l + " ")
 		if i >= thumbTop && i < thumbTop+thumbH {
-			glyphs.WriteString(thumb)
+			b.WriteString(thumb)
 		} else {
-			glyphs.WriteString(track)
+			b.WriteString(track)
 		}
 	}
 
-	return lipgloss.JoinHorizontal(lipgloss.Top, content, " "+glyphs.String())
+	return b.String()
 }
 
 func (m Model) renderCompose() string {
@@ -1218,10 +1246,17 @@ func (m *Model) setStatus(s string) {
 }
 
 // detailBodyHeight calculates how many lines the viewport can use.
+// Includes the detail view's own vertical padding so callers can pass the
+// raw window height directly — this used to be the caller's job (only
+// renderDetail did it, so the viewport.Model built at WindowSizeMsg time
+// carried a Height 2 rows taller than what's actually displayed, and
+// PgUp/PgDown — which scroll by vp.Height — overshot by that much on every
+// press since that persisted Height, not renderDetail's per-render-only
+// copy, is what viewport.Update() actually scrolls by).
 func (m Model) detailBodyHeight() int {
 	// subject(1) + from(1) + to(1) + date(1) + account(1) + divider(1)
 	// + footer-divider(1) + help(1) = 8
-	h := m.height - 8
+	h := m.height - detailPadV*2 - 8
 	if h < 5 {
 		h = 5
 	}
@@ -1488,9 +1523,19 @@ func formatListRow(msg *models.Message, width int, showAcct bool, rowStyle lipgl
 // same disagreement that misaligned notectl's scrollbar. Stripping the
 // selector removes the disagreement at its source instead of trying to
 // reconcile width functions.
+// stripVariationSelectors removes characters whose display width is
+// ambiguous or undefined across terminals/fonts, rather than trying to
+// measure and wrap around them correctly: U+FE0E/FE0F (emoji variation
+// selectors \u2014 a real width mismatch already caused a scrollbar-alignment
+// bug, see the regression test) and U+FFFC (the object-replacement
+// character HTML mail leaves behind for an inline image/attachment once
+// stripped to plain text \u2014 it has no meaningful width or content once
+// there's no image to show, and different terminals render it at
+// different widths, which can misalign a terminal's own cursor tracking
+// on lines further down the same frame).
 func stripVariationSelectors(s string) string {
 	return strings.Map(func(r rune) rune {
-		if r == '\uFE0E' || r == '\uFE0F' {
+		if r == '\uFE0E' || r == '\uFE0F' || r == '\uFFFC' {
 			return -1
 		}
 		return r

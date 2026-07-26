@@ -62,6 +62,31 @@ func TestRenderScrollbarAlignsGlyphColumn(t *testing.T) {
 	}
 }
 
+func TestRenderScrollbarLineAtExactWidthStillHasGapBeforeGlyph(t *testing.T) {
+	// Regression test: a content line that reaches exactly vp.Width used to
+	// get no separating space before the scrollbar glyph. The old
+	// implementation joined content and glyphs via lipgloss.JoinHorizontal,
+	// which pads short lines up to the widest line ACTUALLY present in the
+	// block — a line that IS that widest line gets no padding at all,
+	// gluing the glyph directly onto its last character (looked like
+	// "...Unternehme┃" in a real long line that happened to hit the wrap
+	// width exactly). renderScrollbar now pads against vp.Width itself
+	// instead of the tallest line's incidental width.
+	vp := viewport.New(10, 3)
+	vp.SetContent(strings.Repeat("x", 10) + "\nshort\n" + strings.Repeat("y", 10) + "\nmore\nlines\nhere\nto force scrolling")
+
+	out := renderScrollbar(vp)
+	for i, l := range strings.Split(out, "\n") {
+		r := []rune(l)
+		if len(r) < 2 {
+			continue
+		}
+		if beforeGlyph := r[len(r)-2]; beforeGlyph != ' ' {
+			t.Errorf("line %d: expected a space before the scrollbar glyph, got %q (full line: %q)", i, string(beforeGlyph), l)
+		}
+	}
+}
+
 func TestRenderScrollbarAlignsGlyphColumn_VariationSelectorEmoji(t *testing.T) {
 	// Regression test mirroring notectl's fix: an emoji + U+FE0F variation
 	// selector (e.g. from a real email body) can be measured a different
