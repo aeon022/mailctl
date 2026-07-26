@@ -800,31 +800,27 @@ func (m Model) renderList() string {
 
 	// ── account tab bar ──
 	if len(m.accounts) > 0 {
-		var parts []string
-		for i, a := range m.accounts {
-			acctKey := a
-			if i == 0 {
-				acctKey = "" // "Alle" maps to "" in unreadCounts
-			}
-			label := a
-			if c := m.unreadCounts[acctKey]; c > 0 {
-				label = fmt.Sprintf("%s ·%d", a, c)
-			}
-			if i == m.activeTab {
-				parts = append(parts, styleTabActive.Render(label))
-			} else {
-				parts = append(parts, styleTabInact.Render(label))
-			}
+		entries, hasLeft, hasRight := m.tabWindow(w - 4)
+		var sb strings.Builder
+		if hasLeft {
+			sb.WriteString(styleMeta.Render("‹ "))
 		}
-		bar := strings.Join(parts, "  ")
+		for i, e := range entries {
+			if i > 0 {
+				sb.WriteString("  ")
+			}
+			sb.WriteString(e.text)
+		}
+		if hasRight {
+			sb.WriteString(styleMeta.Render(" ›"))
+		}
+		bar := sb.String()
 		if m.syncing {
 			bar += "  " + m.sp.View() + styleSyncing.Render(" syncing…")
 		}
-		// Nothing constrained this to the terminal width before — with
-		// enough accounts (or long names), the raw joined string overflows
-		// past the right border. MaxWidth truncates ANSI-safely (verified:
-		// it doesn't corrupt the escape codes each tab's own style already
-		// wrapped it in) instead of just letting the terminal wrap it.
+		// MaxWidth is a last-resort safety net now that tabWindow itself
+		// keeps the bar within budget — truncates ANSI-safely if anything
+		// still overflows (e.g. the syncing spinner suffix).
 		b.WriteString(lipgloss.NewStyle().MaxWidth(w).Render(bar) + "\n")
 	} else if m.syncing {
 		b.WriteString(m.sp.View() + styleSyncing.Render(" syncing…") + "\n")
@@ -1343,13 +1339,29 @@ func (m Model) listStartY() int {
 	return y
 }
 
-// tabHitTest returns the account-tab index at column x on the tab bar row
-// (row 1: header is row 0), or -1 if the click didn't land on a tab.
-func (m Model) tabHitTest(x, y int) int {
-	if y != 1 || len(m.accounts) == 0 {
-		return -1
+// tabEntry is one visible account tab: its index into m.accounts, its
+// already-styled label, and that label's rendered width.
+type tabEntry struct {
+	idx  int
+	text string
+	w    int
+}
+
+// tabWindow picks which contiguous run of accounts fits in the tab bar
+// for the given width, always including the active tab — anchoring on
+// activeTab and growing left then right, rather than always starting
+// from account 0, is what makes the bar "scroll" as you tab through
+// accounts instead of just hard-truncating the tail and hiding whichever
+// accounts don't fit from index 0. Shared by renderList (drawing) and
+// tabHitTest (click mapping) so the two can't disagree about which tab is
+// at which column — exactly the kind of drift that caused the detail
+// view's width bug earlier this session.
+func (m Model) tabWindow(w int) (entries []tabEntry, hasLeft, hasRight bool) {
+	if len(m.accounts) == 0 {
+		return nil, false, false
 	}
-	col := 0
+	widths := make([]int, len(m.accounts))
+	rendered := make([]string, len(m.accounts))
 	for i, a := range m.accounts {
 		acctKey := a
 		if i == 0 {
@@ -1359,14 +1371,61 @@ func (m Model) tabHitTest(x, y int) int {
 		if c := m.unreadCounts[acctKey]; c > 0 {
 			label = fmt.Sprintf("%s ·%d", a, c)
 		}
-		w := lipgloss.Width(styleTabInact.Render(label))
 		if i == m.activeTab {
-			w = lipgloss.Width(styleTabActive.Render(label))
+			rendered[i] = styleTabActive.Render(label)
+		} else {
+			rendered[i] = styleTabInact.Render(label)
 		}
-		if x >= col && x < col+w {
-			return i
+		widths[i] = lipgloss.Width(rendered[i])
+	}
+
+	const sep = 2
+	start := m.activeTab
+	width := widths[m.activeTab]
+	for start > 0 {
+		cand := width + sep + widths[start-1]
+		if cand > w {
+			break
 		}
-		col += w + 2 // "  " join separator
+		width = cand
+		start--
+	}
+	end := m.activeTab + 1
+	for end < len(m.accounts) {
+		cand := width + sep + widths[end]
+		if cand > w {
+			break
+		}
+		width = cand
+		end++
+	}
+
+	for i := start; i < end; i++ {
+		entries = append(entries, tabEntry{idx: i, text: rendered[i], w: widths[i]})
+	}
+	return entries, start > 0, end < len(m.accounts)
+}
+
+// tabHitTest returns the account-tab index at column x on the tab bar row
+// (row 1: header is row 0), or -1 if the click didn't land on a tab.
+func (m Model) tabHitTest(x, y int) int {
+	if y != 1 || len(m.accounts) == 0 {
+		return -1
+	}
+	w := min(m.width, 130) - 4
+	entries, hasLeft, _ := m.tabWindow(w)
+	col := 0
+	if hasLeft {
+		col += 2 // "‹ "
+	}
+	for i, e := range entries {
+		if i > 0 {
+			col += 2 // "  " join separator
+		}
+		if x >= col && x < col+e.w {
+			return e.idx
+		}
+		col += e.w
 	}
 	return -1
 }
