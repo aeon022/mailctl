@@ -800,7 +800,16 @@ func (m Model) renderList() string {
 
 	// ── account tab bar ──
 	if len(m.accounts) > 0 {
-		entries, hasLeft, hasRight := m.tabWindow(w - 4)
+		// Reserve the syncing indicator's own room BEFORE handing tabWindow
+		// its budget — otherwise it competes with tab entries for the same
+		// width and MaxWidth's truncation (a last-resort safety net, not
+		// meant to be relied on) can cut it off right when you'd want to
+		// see it confirm a sync actually started.
+		syncSuffix := ""
+		if m.syncing {
+			syncSuffix = "  " + m.sp.View() + styleSyncing.Render(" syncing…")
+		}
+		entries, hasLeft, hasRight := m.tabWindow(w - 4 - lipgloss.Width(syncSuffix))
 		var sb strings.Builder
 		if hasLeft {
 			sb.WriteString(styleMeta.Render("‹ "))
@@ -814,13 +823,7 @@ func (m Model) renderList() string {
 		if hasRight {
 			sb.WriteString(styleMeta.Render(" ›"))
 		}
-		bar := sb.String()
-		if m.syncing {
-			bar += "  " + m.sp.View() + styleSyncing.Render(" syncing…")
-		}
-		// MaxWidth is a last-resort safety net now that tabWindow itself
-		// keeps the bar within budget — truncates ANSI-safely if anything
-		// still overflows (e.g. the syncing spinner suffix).
+		bar := sb.String() + syncSuffix
 		b.WriteString(lipgloss.NewStyle().MaxWidth(w).Render(bar) + "\n")
 	} else if m.syncing {
 		b.WriteString(m.sp.View() + styleSyncing.Render(" syncing…") + "\n")
