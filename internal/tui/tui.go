@@ -21,6 +21,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	runewidth "github.com/mattn/go-runewidth"
 	"github.com/sahilm/fuzzy"
 )
 
@@ -884,10 +885,19 @@ func (m Model) renderList() string {
 	return b.String()
 }
 
+// detailPadV/detailPadH inset the opened-mail view from the terminal edges
+// — it previously rendered flush against row/column 0. Shrinking the
+// model's effective width/height first (rather than padding the finished
+// string) means every width calc below — dividers, the viewport, the
+// scrollbar — already accounts for the smaller canvas.
+const detailPadV, detailPadH = 1, 2
+
 func (m Model) renderDetail() string {
 	if m.detail == nil {
 		return ""
 	}
+	m.width -= detailPadH * 2
+	m.height -= detailPadV * 2
 	w := min(m.width, 130)
 	var b strings.Builder
 
@@ -918,7 +928,7 @@ func (m Model) renderDetail() string {
 	if m.aiDrafting {
 		b.WriteString("\n  " + m.sp.View() + styleSyncing.Render(" Claude is drafting a reply…"))
 	}
-	return b.String()
+	return lipgloss.NewStyle().Padding(detailPadV, detailPadH).Render(b.String())
 }
 
 // renderScrollbar renders viewport content with a sidebar scrollbar track.
@@ -1490,15 +1500,41 @@ func formatDetail(msg *models.Message, width int) string {
 	w := min(width-2, 128) // leave room for scrollbar track
 	var lines []string
 	for _, l := range strings.Split(body, "\n") {
-		if len(l) > w {
-			for len(l) > w {
-				lines = append(lines, l[:w])
-				l = l[w:]
-			}
-		}
-		lines = append(lines, l)
+		lines = append(lines, wrapByWidth(l, w)...)
 	}
 	return strings.Join(lines, "\n")
+}
+
+// wrapByWidth breaks s into lines of at most w display columns, cutting on
+// rune boundaries. formatDetail used to slice by byte length (l[:w]), which
+// corrupts a line the moment a multi-byte UTF-8 character (any German
+// umlaut, an emoji) straddles the cut point — the resulting invalid UTF-8
+// throws off that line's measured width and visually breaks the
+// scrollbar's glyph column for the rest of the message.
+func wrapByWidth(s string, w int) []string {
+	if w <= 0 || runewidth.StringWidth(s) <= w {
+		return []string{s}
+	}
+	var lines []string
+	runes := []rune(s)
+	for len(runes) > 0 {
+		cut := len(runes)
+		width := 0
+		for i, r := range runes {
+			rw := runewidth.RuneWidth(r)
+			if width+rw > w {
+				cut = i
+				break
+			}
+			width += rw
+		}
+		if cut == 0 {
+			cut = 1 // a single rune wider than w: take it anyway, don't loop forever
+		}
+		lines = append(lines, string(runes[:cut]))
+		runes = runes[cut:]
+	}
+	return lines
 }
 
 func buildQuote(msg *models.Message) string {

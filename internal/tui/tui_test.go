@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/aeon022/mailctl/internal/models"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -12,6 +13,25 @@ import (
 	runewidth "github.com/mattn/go-runewidth"
 	"github.com/muesli/termenv"
 )
+
+func TestFormatDetail_WrapsOnRuneBoundaryNotByte(t *testing.T) {
+	// Regression test: formatDetail used to wrap long lines with l[:w], a
+	// byte-length slice. Placing a 2-byte UTF-8 character (a German umlaut,
+	// extremely common in real mail bodies) so the cut point lands inside
+	// its encoding corrupts the line into invalid UTF-8, which throws off
+	// that line's measured width and breaks the detail view's scrollbar
+	// alignment for every line after it.
+	w := 20
+	body := strings.Repeat("a", w-1) + "ä" + strings.Repeat("b", 30)
+	msg := &models.Message{Body: body}
+
+	out := formatDetail(msg, w+2) // formatDetail uses width-2 as its wrap width
+	for _, line := range strings.Split(out, "\n") {
+		if !utf8.ValidString(line) {
+			t.Errorf("formatDetail produced invalid UTF-8 in line %q", line)
+		}
+	}
+}
 
 func TestRenderScrollbarAlignsGlyphColumn(t *testing.T) {
 	vp := viewport.New(20, 5)
