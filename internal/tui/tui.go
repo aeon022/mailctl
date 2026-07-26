@@ -816,7 +816,12 @@ func (m Model) renderList() string {
 		if m.syncing {
 			bar += "  " + m.sp.View() + styleSyncing.Render(" syncing…")
 		}
-		b.WriteString(bar + "\n")
+		// Nothing constrained this to the terminal width before — with
+		// enough accounts (or long names), the raw joined string overflows
+		// past the right border. MaxWidth truncates ANSI-safely (verified:
+		// it doesn't corrupt the escape codes each tab's own style already
+		// wrapped it in) instead of just letting the terminal wrap it.
+		b.WriteString(lipgloss.NewStyle().MaxWidth(w).Render(bar) + "\n")
 	} else if m.syncing {
 		b.WriteString(m.sp.View() + styleSyncing.Render(" syncing…") + "\n")
 	} else {
