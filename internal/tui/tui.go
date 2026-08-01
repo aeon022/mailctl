@@ -148,14 +148,16 @@ type Model struct {
 	height int
 
 	// list
-	msgs        []models.Message // filtered (by searchQ) view of allMsgs
-	allMsgs     []models.Message // everything loaded for the current unread/account scope
-	cursor      int
-	hoverRow    int // m.msgs index under the mouse cursor, -1 when none
-	unreadOnly  bool
-	searchQ     string
-	searching   bool
-	searchInput textinput.Model
+	msgs         []models.Message // filtered (by searchQ) view of allMsgs
+	allMsgs      []models.Message // everything loaded for the current unread/account scope
+	cursor       int
+	hoverRow     int // m.msgs index under the mouse cursor, -1 when none
+	lastClickRow int // m.msgs index of the previous left-click, -1 when none — double-click opens the message detail, same window/pattern taskctl uses
+	lastClickAt  time.Time
+	unreadOnly   bool
+	searchQ      string
+	searching    bool
+	searchInput  textinput.Model
 
 	// tabs
 	accounts     []string // ["Alle", "iCloud", ...]
@@ -226,6 +228,7 @@ func New() Model {
 		bodyArea:     body,
 		loading:      true,
 		hoverRow:     -1,
+		lastClickRow: -1,
 	}
 }
 
@@ -377,7 +380,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			if i := m.rowHitTest(msg.Y); i >= 0 {
+				now := time.Now()
+				if i == m.lastClickRow && now.Sub(m.lastClickAt) < doubleClickWindow {
+					m.cursor = i
+					m.lastClickRow = -1 // consumed, so a third click starts fresh
+					msgv := m.msgs[i]
+					m.detail = &msgv
+					if !msgv.Read {
+						m.msgs[i].Read = true
+						m.detail.Read = true
+					}
+					m.vp.SetContent("Loading body…")
+					m.vp.GotoTop()
+					m.view = viewDetail
+					return m, tea.Batch(loadBodyCmd(&msgv), markReadCmd(msgv.ID))
+				}
 				m.cursor = i
+				m.lastClickRow = i
+				m.lastClickAt = now
 			}
 		case tea.MouseButtonNone:
 			if msg.Action == tea.MouseActionMotion && m.view == viewList {
@@ -926,6 +946,10 @@ func (m Model) renderList() string {
 // string) means every width calc below — dividers, the viewport, the
 // scrollbar — already accounts for the smaller canvas.
 const detailPadV, detailPadH = 1, 2
+
+// doubleClickWindow opens the message detail on a second click within this
+// window, same pattern and duration taskctl uses for its own double-click.
+const doubleClickWindow = 400 * time.Millisecond
 
 // detailRawWidth is the width renderDetail actually lays out with, after
 // the outer padding and the 1-column terminal-edge safety margin (see
