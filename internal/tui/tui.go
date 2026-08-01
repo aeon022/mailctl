@@ -17,6 +17,7 @@ import (
 	"github.com/aeon022/missionctl-core/lastsync"
 	"github.com/aeon022/missionctl-core/overlay"
 	"github.com/aeon022/missionctl-core/theme"
+	"github.com/aeon022/missionctl-core/uistate"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -172,6 +173,12 @@ type Model struct {
 	activeTab    int      // 0 = Alle
 	unreadCounts map[string]int
 
+	// pendingAccountRestore holds the persisted last-active account name
+	// (see uistate) until m.accounts first loads, at which point it's
+	// resolved to an index and cleared — same one-shot-until-data-arrives
+	// pattern as timectl/taskctl/notectl's own cross-tool "jump to X" flows.
+	pendingAccountRestore string
+
 	// detail
 	detail *models.Message
 	vp     viewport.Model
@@ -228,17 +235,36 @@ func New() Model {
 	body.ShowLineNumbers = false
 	body.SetHeight(10)
 
+	var state persistedState
+	uistate.Load(config.UIStatePath(), &state)
+
 	return Model{
-		sp:           sp,
-		searchInput:  si,
-		toInput:      to,
-		subjectInput: sub,
-		attachInput:  att,
-		bodyArea:     body,
-		loading:      true,
-		hoverRow:     -1,
-		lastClickRow: -1,
+		sp:                    sp,
+		searchInput:           si,
+		toInput:               to,
+		subjectInput:          sub,
+		attachInput:           att,
+		bodyArea:              body,
+		loading:               true,
+		hoverRow:              -1,
+		lastClickRow:          -1,
+		unreadOnly:            state.UnreadOnly,
+		pendingAccountRestore: state.LastAccount,
 	}
+}
+
+// persistedState is what New() restores from and the tab/filter handlers
+// save to via saveUIState — see missionctl-core/uistate.
+type persistedState struct {
+	LastAccount string `json:"last_account"`
+	UnreadOnly  bool   `json:"unread_only"`
+}
+
+func (m Model) saveUIState() {
+	_ = uistate.Save(config.UIStatePath(), persistedState{
+		LastAccount: m.activeAccount(),
+		UnreadOnly:  m.unreadOnly,
+	})
 }
 
 func Run() error {
@@ -251,7 +277,7 @@ func Run() error {
 // ── Init ──────────────────────────────────────────────────────────────────────
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(loadMsgsCmd(false, ""), tea.WindowSize(), m.sp.Tick, loadLastSyncedCmd())
+	return tea.Batch(loadMsgsCmd(m.unreadOnly, m.pendingAccountRestore), tea.WindowSize(), m.sp.Tick, loadLastSyncedCmd())
 }
 
 type lastSyncedLoadedMsg struct{ t time.Time }
@@ -292,6 +318,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.msgs = filterMsgs(m.allMsgs, m.searchQ)
 		if len(msg.accounts) > 0 {
 			m.accounts = append([]string{"Alle"}, msg.accounts...)
+		}
+		if m.pendingAccountRestore != "" {
+			for i, a := range m.accounts {
+				if a == m.pendingAccountRestore {
+					m.activeTab = i
+					break
+				}
+			}
+			m.pendingAccountRestore = ""
 		}
 		if m.cursor >= len(m.msgs) {
 			m.cursor = max(0, len(m.msgs)-1)
@@ -575,12 +610,14 @@ func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if len(m.accounts) > 0 {
 			m.activeTab = (m.activeTab + 1) % len(m.accounts)
 			m.cursor = 0
+			m.saveUIState()
 			return m, loadMsgsCmd(m.unreadOnly, m.activeAccount())
 		}
 	case "shift+tab":
 		if len(m.accounts) > 0 {
 			m.activeTab = (m.activeTab - 1 + len(m.accounts)) % len(m.accounts)
 			m.cursor = 0
+			m.saveUIState()
 			return m, loadMsgsCmd(m.unreadOnly, m.activeAccount())
 		}
 	case "1", "2", "3", "4", "5", "6", "7", "8", "9":
@@ -686,6 +723,7 @@ func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "u":
 		m.unreadOnly = !m.unreadOnly
 		m.cursor = 0
+		m.saveUIState()
 		return m, loadMsgsCmd(m.unreadOnly, m.activeAccount())
 	case "/":
 		m.searching = true

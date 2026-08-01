@@ -61,3 +61,12 @@ func LastSyncedPath() string {
 	_ = os.MkdirAll(dir, 0755)
 	return filepath.Join(dir, "last_synced")
 }
+
+// UIStatePath is where the TUI persists small preferences (last active
+// account tab, last unread-only filter) — see missionctl-core/uistate.
+func UIStatePath() string {
+	home, _ := os.UserHomeDir()
+	dir := filepath.Join(home, "Library", "Application Support", "mailctl")
+	_ = os.MkdirAll(dir, 0755)
+	return filepath.Join(dir, "ui_state.json")
+}
