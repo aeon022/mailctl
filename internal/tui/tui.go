@@ -13,6 +13,8 @@ import (
 	"github.com/aeon022/mailctl/internal/mail"
 	"github.com/aeon022/mailctl/internal/models"
 	"github.com/aeon022/mailctl/internal/store"
+	"github.com/aeon022/missionctl-core/humanize"
+	"github.com/aeon022/missionctl-core/lastsync"
 	"github.com/aeon022/missionctl-core/overlay"
 	"github.com/aeon022/missionctl-core/theme"
 	"github.com/charmbracelet/bubbles/spinner"
@@ -181,6 +183,7 @@ type Model struct {
 	statusTime time.Time
 	err        error
 	syncing    bool
+	lastSynced time.Time // zero = never synced this install
 	sp         spinner.Model
 	aiDrafting bool
 	confirmID  string
@@ -242,7 +245,16 @@ func Run() error {
 // ── Init ──────────────────────────────────────────────────────────────────────
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(loadMsgsCmd(false, ""), tea.WindowSize(), m.sp.Tick)
+	return tea.Batch(loadMsgsCmd(false, ""), tea.WindowSize(), m.sp.Tick, loadLastSyncedCmd())
+}
+
+type lastSyncedLoadedMsg struct{ t time.Time }
+
+func loadLastSyncedCmd() tea.Cmd {
+	return func() tea.Msg {
+		t, _ := lastsync.Load(config.LastSyncedPath())
+		return lastSyncedLoadedMsg{t: t}
+	}
 }
 
 func (m Model) activeAccount() string {
@@ -282,6 +294,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.unreadCounts = msg.unreadCounts
 		}
 
+	case lastSyncedLoadedMsg:
+		m.lastSynced = msg.t
+
 	case syncDoneMsg:
 		m.syncing = false
 		if msg.err != nil {
@@ -291,6 +306,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.accounts = append([]string{"Alle"}, msg.accounts...)
 			}
 			m.setStatus(fmt.Sprintf("Synced %d messages", msg.count))
+			m.lastSynced = time.Now()
+			_ = lastsync.Save(config.LastSyncedPath(), m.lastSynced)
 			// reload with active account filter to preserve tab
 			return m, loadMsgsCmd(m.unreadOnly, m.activeAccount())
 		}
@@ -855,6 +872,8 @@ func (m Model) renderList() string {
 		syncSuffix := ""
 		if m.syncing {
 			syncSuffix = "  " + m.sp.View() + styleSyncing.Render(" syncing…")
+		} else if !m.lastSynced.IsZero() {
+			syncSuffix = "  " + styleMeta.Render("synced "+humanize.TimeAgo(m.lastSynced))
 		}
 		entries, hasLeft, hasRight := m.tabWindow(w - 4 - lipgloss.Width(syncSuffix))
 		var sb strings.Builder
