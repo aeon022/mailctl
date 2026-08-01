@@ -161,6 +161,12 @@ type Model struct {
 	searching    bool
 	searchInput  textinput.Model
 
+	// batch select mode ("v") — bulk mark-read / bulk-delete, same pattern
+	// taskctl's own select mode uses.
+	selecting          bool
+	selected           map[string]bool // keyed by message ID
+	batchConfirmDelete bool            // "d" once arms it, "d" again executes — mirrors the single-message m.confirmID press-twice pattern
+
 	// tabs
 	accounts     []string // ["Alle", "iCloud", ...]
 	activeTab    int      // 0 = Alle
@@ -494,6 +500,74 @@ func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	if m.selecting {
+		switch msg.String() {
+		case "esc":
+			m.selecting = false
+			m.selected = nil
+			m.batchConfirmDelete = false
+		case "up", "k":
+			m.batchConfirmDelete = false
+			if m.cursor > 0 {
+				m.cursor--
+			}
+		case "down", "j":
+			m.batchConfirmDelete = false
+			if m.cursor < len(m.msgs)-1 {
+				m.cursor++
+			}
+		case " ":
+			m.batchConfirmDelete = false
+			if len(m.msgs) > 0 {
+				id := m.msgs[m.cursor].ID
+				if m.selected[id] {
+					delete(m.selected, id)
+				} else {
+					m.selected[id] = true
+				}
+			}
+		case "A":
+			m.batchConfirmDelete = false
+			for _, msg := range m.msgs {
+				m.selected[msg.ID] = true
+			}
+		case "r":
+			if len(m.selected) == 0 {
+				break
+			}
+			ids := selectedIDs(m.selected)
+			for i := range m.msgs {
+				if m.selected[m.msgs[i].ID] {
+					m.msgs[i].Read = true
+				}
+			}
+			m.selecting = false
+			m.selected = nil
+			m.setStatus(fmt.Sprintf("Marked %d read", len(ids)))
+			return m, batchMarkReadCmd(ids)
+		case "d":
+			if len(m.selected) == 0 {
+				break
+			}
+			if !m.batchConfirmDelete {
+				m.batchConfirmDelete = true
+				m.setStatus(fmt.Sprintf("Press d again to delete %d message(s)  esc to cancel", len(m.selected)))
+				return m, nil
+			}
+			ids := selectedIDs(m.selected)
+			m.msgs = removeMessages(m.msgs, m.selected)
+			if m.cursor >= len(m.msgs) {
+				m.cursor = max(0, len(m.msgs)-1)
+			}
+			m.selecting = false
+			m.selected = nil
+			m.batchConfirmDelete = false
+			m.setStatus(fmt.Sprintf("Deleted %d message(s)", len(ids)))
+			return m, batchDeleteCmd(ids)
+		}
+		return m, nil
+	}
+
 	switch msg.String() {
 	case "q", "ctrl+c":
 		return m, tea.Quit
@@ -593,6 +667,11 @@ func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			msg := &m.msgs[m.cursor]
 			m.setStatus("Copied to clipboard")
 			return m, copyToClipboardCmd(msg.Subject + " — " + msg.From)
+		}
+	case "v":
+		if len(m.msgs) > 0 {
+			m.selecting = true
+			m.selected = map[string]bool{m.msgs[m.cursor].ID: true}
 		}
 	case "n":
 		m.replyTo = nil
@@ -908,6 +987,13 @@ func (m Model) renderList() string {
 			chips = append(chips, styleTabInact.Render("/"+m.searchQ))
 		}
 		b.WriteString(strings.Join(chips, "  ") + "\n")
+	}
+
+	// ── batch select mode badge ──
+	if m.selecting {
+		badge := styleSelected.Render(fmt.Sprintf("select: %d", len(m.selected)))
+		hint := styleMeta.Render("  space toggle  A all  r mark read  d delete  esc cancel")
+		b.WriteString(badge + hint + "\n")
 	}
 
 	// ── search input ──
@@ -1269,6 +1355,65 @@ func deleteCmd(id string) tea.Cmd {
 	}
 }
 
+// selectedIDs flattens a selection set into a slice.
+func selectedIDs(sel map[string]bool) []string {
+	ids := make([]string, 0, len(sel))
+	for id := range sel {
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+// removeMessages returns msgs with every message whose ID is in sel dropped
+// — used to optimistically update the list right after a batch delete,
+// mirroring the single-delete "d" key's own optimistic removal.
+func removeMessages(msgs []models.Message, sel map[string]bool) []models.Message {
+	out := msgs[:0:0]
+	for _, msg := range msgs {
+		if !sel[msg.ID] {
+			out = append(out, msg)
+		}
+	}
+	return out
+}
+
+// batchMarkReadCmd is the batch-mode ("v" + "r") version of markReadCmd.
+func batchMarkReadCmd(ids []string) tea.Cmd {
+	return func() tea.Msg {
+		s, err := store.New(config.DBPath())
+		if err != nil {
+			return readMarkedMsg{}
+		}
+		defer s.Close()
+		ctx := context.Background()
+		for _, id := range ids {
+			_ = s.MarkRead(ctx, id)
+		}
+		return readMarkedMsg{}
+	}
+}
+
+// batchDeleteCmd is the batch-mode ("v" + "d") version of deleteCmd.
+func batchDeleteCmd(ids []string) tea.Cmd {
+	return func() tea.Msg {
+		s, err := store.New(config.DBPath())
+		if err != nil {
+			return deletedMsg{err}
+		}
+		defer s.Close()
+		ctx := context.Background()
+		var lastErr error
+		for _, id := range ids {
+			if err := s.DeleteMessage(ctx, id); err != nil {
+				lastErr = err
+				continue
+			}
+			_ = mail.DeleteInMail(id)
+		}
+		return deletedMsg{lastErr}
+	}
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 func (m *Model) resetCompose(to, subject string) {
@@ -1377,7 +1522,15 @@ func (m Model) buildListLinesWithMapping(w int) ([]string, int, []int) {
 		default:
 			rowStyle = styleRead
 		}
-		lines = append(lines, formatListRow(msg, w, showAcct, rowStyle, m.searchQ))
+		row := formatListRow(msg, w, showAcct, rowStyle, m.searchQ)
+		if m.selecting {
+			checkbox := styleMeta.Render("[ ] ")
+			if m.selected[msg.ID] {
+				checkbox = styleSelected.Render("[x]") + " "
+			}
+			row = checkbox + row
+		}
+		lines = append(lines, row)
 		lineToMsg = append(lineToMsg, i)
 
 		// body preview (only when body is available)
@@ -1404,6 +1557,9 @@ func (m Model) buildListLinesWithMapping(w int) ([]string, int, []int) {
 func (m Model) listStartY() int {
 	y := 3 // header + tab bar + divider
 	if m.unreadOnly || m.searchQ != "" {
+		y++
+	}
+	if m.selecting {
 		y++
 	}
 	if m.searching {
