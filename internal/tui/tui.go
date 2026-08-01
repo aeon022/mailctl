@@ -472,6 +472,33 @@ func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.cursor = 0
 			return m, loadMsgsCmd(m.unreadOnly, m.activeAccount())
 		}
+	case "1", "2", "3", "4", "5", "6", "7", "8", "9":
+		// jump to the nth visible (on-screen) message, date-group headers
+		// not counted — mirrors rowHitTest's own scroll-window math
+		// (buildListLinesWithMapping + the same start-line calc) so a
+		// digit lands on the same message a click at that position would.
+		n := int(msg.String()[0] - '0')
+		w := min(m.width, 130)
+		_, cursorLine, lineToMsg := m.buildListLinesWithMapping(w)
+		listH := m.height - m.listStartY() - 2
+		if listH < 1 {
+			listH = 1
+		}
+		start := 0
+		if cursorLine >= listH {
+			start = cursorLine - listH + 1
+		}
+		count := 0
+		for _, msgIdx := range lineToMsg[start:] {
+			if msgIdx < 0 {
+				continue
+			}
+			count++
+			if count == n {
+				m.cursor = msgIdx
+				break
+			}
+		}
 	case "j", "down":
 		if m.cursor < len(m.msgs)-1 {
 			m.cursor++
