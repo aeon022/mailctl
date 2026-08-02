@@ -331,7 +331,19 @@ Apple Mail (AppleScript)  —sync—>  SQLite (~/.local/share/mailctl/mail.db)
                    mailctl / mailctl tui        mailctl mcp
 ```
 
-AppleScript bridges mailctl to Apple Mail for all read and write operations (sync, send, draft, delete, open). The SQLite store uses WAL mode for fast concurrent reads. The TUI and MCP server both query the same database, so a sync triggered from the TUI is immediately visible to an AI agent and vice versa.
+AppleScript bridges mailctl to Apple Mail for all read and write operations (sync, send, draft, delete, open). The SQLite store uses WAL mode by default for fast concurrent reads (see below for syncing across devices). The TUI and MCP server both query the same database, so a sync triggered from the TUI is immediately visible to an AI agent and vice versa.
+
+---
+
+## Syncing across devices
+
+By default mailctl's cache lives at `~/Library/Application Support/mailctl/mailctl.db`, local to this machine. To share it across devices, set `data_dir` (in `~/.config/mailctl/config.yaml`) or the `MAILCTL_DATA_DIR` env var to a folder you already sync yourself — iCloud Drive, Dropbox, Syncthing, etc:
+
+```bash
+export MAILCTL_DATA_DIR="$HOME/Library/Mobile Documents/com~apple~CloudDocs/mailctl"
+```
+
+Once set, mailctl automatically switches its SQLite journal mode from WAL to rollback-journal — WAL splits the database across multiple files that a folder-sync client can't update atomically together, so this switch keeps the directory down to a single consistent file whenever mailctl isn't actively writing. A same-machine lock also prevents two mailctl processes from opening the cache at once (run `mailctl doctor` to see the current mode and path). This only protects against the same-machine and stale-snapshot failure modes, not two machines editing at the exact same instant; an undownloaded iCloud file is reported explicitly rather than as a bare error.
 
 ---
 
