@@ -24,6 +24,36 @@ func ParseFile(path string) (*models.Draft, error) {
 
 // Parse parses raw Markdown email bytes.
 func Parse(data []byte) (*models.Draft, error) {
+	draft, err := parseRaw(data)
+	if err != nil {
+		return nil, err
+	}
+	if len(draft.To) == 0 {
+		return nil, fmt.Errorf("frontmatter missing 'to' field")
+	}
+	if draft.Subject == "" {
+		return nil, fmt.Errorf("frontmatter missing 'subject' field")
+	}
+	return draft, nil
+}
+
+// ParseTemplate is like Parse but doesn't require a 'to' field — for
+// reusable snippet templates (see internal/templates) where the recipient
+// is filled in later, not baked into the file.
+func ParseTemplate(data []byte) (*models.Draft, error) {
+	draft, err := parseRaw(data)
+	if err != nil {
+		return nil, err
+	}
+	if draft.Subject == "" {
+		return nil, fmt.Errorf("frontmatter missing 'subject' field")
+	}
+	return draft, nil
+}
+
+// parseRaw does the shared frontmatter parsing and {{.var}} expansion; Parse
+// and ParseTemplate differ only in which fields they then require.
+func parseRaw(data []byte) (*models.Draft, error) {
 	const sep = "---"
 	content := string(data)
 
@@ -68,13 +98,6 @@ func Parse(data []byte) (*models.Draft, error) {
 		return nil, fmt.Errorf("render template: %w", err)
 	}
 	draft.Body = buf.String()
-
-	if len(draft.To) == 0 {
-		return nil, fmt.Errorf("frontmatter missing 'to' field")
-	}
-	if draft.Subject == "" {
-		return nil, fmt.Errorf("frontmatter missing 'subject' field")
-	}
 
 	return &draft, nil
 }

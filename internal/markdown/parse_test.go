@@ -86,3 +86,24 @@ body`
 		t.Errorf("want 'subject' error, got %v", err)
 	}
 }
+
+func TestParseTemplate_NoToRequired(t *testing.T) {
+	src := `---
+subject: Following up
+---
+Hi {{.name}}, just checking in.`
+	d, err := ParseTemplate([]byte(src))
+	if err != nil {
+		t.Fatalf("ParseTemplate should not require 'to': %v", err)
+	}
+	if d.Subject != "Following up" {
+		t.Errorf("unexpected subject: %q", d.Subject)
+	}
+}
+
+func TestParseTemplate_StillRequiresSubject(t *testing.T) {
+	src := "---\nto: []\n---\nbody"
+	if _, err := ParseTemplate([]byte(src)); err == nil || !strings.Contains(err.Error(), "subject") {
+		t.Errorf("want 'subject' error, got %v", err)
+	}
+}

@@ -13,6 +13,7 @@ import (
 	"github.com/aeon022/mailctl/internal/mail"
 	"github.com/aeon022/mailctl/internal/models"
 	"github.com/aeon022/mailctl/internal/store"
+	"github.com/aeon022/mailctl/internal/templates"
 	"github.com/aeon022/missionctl-core/humanize"
 	"github.com/aeon022/missionctl-core/lastsync"
 	"github.com/aeon022/missionctl-core/overlay"
@@ -190,6 +191,11 @@ type Model struct {
 	bodyArea     textarea.Model
 	composeFocus int
 	replyTo      *models.Message
+
+	// template picker (ctrl+t while composing)
+	templatePicking bool
+	templateNames   []string
+	templateCursor  int
 
 	// status
 	status     string
@@ -843,11 +849,41 @@ func (m Model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) updateCompose(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.templatePicking {
+		switch msg.String() {
+		case "esc", "ctrl+t":
+			m.templatePicking = false
+		case "j", "down":
+			if m.templateCursor < len(m.templateNames)-1 {
+				m.templateCursor++
+			}
+		case "k", "up":
+			if m.templateCursor > 0 {
+				m.templateCursor--
+			}
+		case "enter":
+			m.templatePicking = false
+			if m.templateCursor < len(m.templateNames) {
+				if d, err := templates.Load(m.templateNames[m.templateCursor]); err == nil {
+					m.subjectInput.SetValue(d.Subject)
+					m.bodyArea.SetValue(d.Body)
+				}
+			}
+		}
+		return m, nil
+	}
+
 	switch msg.String() {
 	case "ctrl+s":
 		return m, sendCmd(m.toInput.Value(), m.subjectInput.Value(), m.bodyArea.Value(), parseAttachments(m.attachInput.Value()))
 	case "ctrl+d":
 		return m, draftCmd(m.toInput.Value(), m.subjectInput.Value(), m.bodyArea.Value(), parseAttachments(m.attachInput.Value()))
+	case "ctrl+t":
+		names, _ := templates.List()
+		m.templatePicking = true
+		m.templateNames = names
+		m.templateCursor = 0
+		return m, nil
 	case "esc":
 		m.view = viewList
 		return m, nil
@@ -888,6 +924,9 @@ func (m Model) View() string {
 	case viewDetail:
 		return m.renderDetail()
 	case viewCompose:
+		if m.templatePicking {
+			return overlay.Center(m.renderCompose(), m.renderTemplatePicker(), m.width, m.height, 0)
+		}
 		return m.renderCompose()
 	case viewHelp:
 		// "?" is only reachable from the main list, so the list is always
@@ -1220,9 +1259,34 @@ func (m Model) renderCompose() string {
 	if m.err != nil {
 		b.WriteString(styleErr.Render("✗ "+m.err.Error()) + "\n")
 	} else {
-		b.WriteString(styleHelp.Render("tab:next  ctrl+s:send  ctrl+d:draft  esc:cancel  attach:comma-sep paths"))
+		b.WriteString(styleHelp.Render("tab:next  ctrl+s:send  ctrl+d:draft  ctrl+t:template  esc:cancel  attach:comma-sep paths"))
 	}
 	return b.String()
+}
+
+// renderTemplatePicker overlays a simple j/k list of saved templates on top
+// of the compose view — same overlay.Center + rounded-border pattern
+// renderHelpPopup uses.
+func (m Model) renderTemplatePicker() string {
+	var b strings.Builder
+	b.WriteString(styleHeader.Render("Insert template") + "\n\n")
+	if len(m.templateNames) == 0 {
+		b.WriteString(styleMeta.Render("No templates yet — `mailctl template new <name>`") + "\n")
+	}
+	for i, n := range m.templateNames {
+		if i == m.templateCursor {
+			b.WriteString(styleTabActive.Render("› "+n) + "\n")
+		} else {
+			b.WriteString("  " + n + "\n")
+		}
+	}
+	b.WriteString("\n" + styleMeta.Render("j/k move  enter insert  esc cancel"))
+	return lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(colorBlue).
+		Padding(1, 2).
+		Width(min(50, m.width-4)).
+		Render(b.String())
 }
 
 // ── Commands ──────────────────────────────────────────────────────────────────
