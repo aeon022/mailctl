@@ -1299,7 +1299,7 @@ func (m Model) renderTemplatePicker() string {
 // search tool, just not from here anymore.
 func loadMsgsCmd(unreadOnly bool, account string) tea.Cmd {
 	return func() tea.Msg {
-		s, err := store.New(config.DBPath())
+		s, err := store.New(config.DBPath(), config.Shared())
 		if err != nil {
 			return errMsg{err}
 		}
@@ -1356,7 +1356,7 @@ func syncCmd() tea.Cmd {
 		if err != nil {
 			return syncDoneMsg{err: err}
 		}
-		s, err := store.New(config.DBPath())
+		s, err := store.New(config.DBPath(), config.Shared())
 		if err != nil {
 			return syncDoneMsg{err: err}
 		}
@@ -1381,7 +1381,7 @@ func loadBodyCmd(msg *models.Message) tea.Cmd {
 
 func markReadCmd(id string) tea.Cmd {
 	return func() tea.Msg {
-		s, err := store.New(config.DBPath())
+		s, err := store.New(config.DBPath(), config.Shared())
 		if err != nil {
 			return readMarkedMsg{}
 		}
@@ -1431,7 +1431,7 @@ func openInMailCmd(messageID string) tea.Cmd {
 
 func markUnreadCmd(id string) tea.Cmd {
 	return func() tea.Msg {
-		s, err := store.New(config.DBPath())
+		s, err := store.New(config.DBPath(), config.Shared())
 		if err != nil {
 			return unreadMarkedMsg{}
 		}
@@ -1444,7 +1444,7 @@ func markUnreadCmd(id string) tea.Cmd {
 
 func deleteCmd(id string) tea.Cmd {
 	return func() tea.Msg {
-		s, err := store.New(config.DBPath())
+		s, err := store.New(config.DBPath(), config.Shared())
 		if err != nil {
 			return deletedMsg{err}
 		}
@@ -1482,7 +1482,7 @@ func removeMessages(msgs []models.Message, sel map[string]bool) []models.Message
 // batchMarkReadCmd is the batch-mode ("v" + "r") version of markReadCmd.
 func batchMarkReadCmd(ids []string) tea.Cmd {
 	return func() tea.Msg {
-		s, err := store.New(config.DBPath())
+		s, err := store.New(config.DBPath(), config.Shared())
 		if err != nil {
 			return readMarkedMsg{}
 		}
@@ -1498,7 +1498,7 @@ func batchMarkReadCmd(ids []string) tea.Cmd {
 // batchDeleteCmd is the batch-mode ("v" + "d") version of deleteCmd.
 func batchDeleteCmd(ids []string) tea.Cmd {
 	return func() tea.Msg {
-		s, err := store.New(config.DBPath())
+		s, err := store.New(config.DBPath(), config.Shared())
 		if err != nil {
 			return deletedMsg{err}
 		}

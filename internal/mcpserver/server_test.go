@@ -25,7 +25,7 @@ func setupTestDB(t *testing.T) {
 	config.DBPathOverride = path
 	t.Cleanup(func() { config.DBPathOverride = "" })
 
-	s, err := store.New(path)
+	s, err := store.New(path, false)
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}

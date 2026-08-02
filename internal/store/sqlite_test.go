@@ -12,7 +12,7 @@ import (
 func newTestStore(t *testing.T) *Store {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "mailctl.db")
-	s, err := New(path)
+	s, err := New(path, false)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

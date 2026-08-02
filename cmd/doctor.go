@@ -14,6 +14,7 @@ var doctorCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		checks := []doctor.Check{
 			doctor.CheckSQLite("Database", config.DBPath(), "messages"),
+			doctor.CheckDataDir("Data directory", config.DBPath(), config.Shared()),
 			doctor.CheckAppleApp("Mail.app", "Mail"),
 		}
 		if !doctor.PrintReport(checks) {

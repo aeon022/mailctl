@@ -86,7 +86,7 @@ func handleInbox(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResul
 	count := int(req.GetFloat("count", 20))
 	unreadOnly := req.GetBool("unread_only", false)
 
-	s, err := store.New(config.DBPath())
+	s, err := store.New(config.DBPath(), config.Shared())
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -113,7 +113,7 @@ func handleSearch(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResu
 		return mcp.NewToolResultError("query is required"), nil
 	}
 
-	s, err := store.New(config.DBPath())
+	s, err := store.New(config.DBPath(), config.Shared())
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -169,7 +169,7 @@ func handleSync(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
-	s, err := store.New(config.DBPath())
+	s, err := store.New(config.DBPath(), config.Shared())
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}

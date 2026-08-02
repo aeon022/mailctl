@@ -21,7 +21,7 @@ var threadCmd = &cobra.Command{
 		subject := args[0]
 
 		// try SQLite cache first
-		s, err := store.New(config.DBPath())
+		s, err := store.New(config.DBPath(), config.Shared())
 		if err == nil {
 			defer s.Close()
 			msgs, _ := s.ListMessages(context.Background(), store.Filter{
