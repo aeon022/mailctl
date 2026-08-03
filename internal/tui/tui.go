@@ -18,6 +18,7 @@ import (
 	"github.com/aeon022/missionctl-core/keymap"
 	"github.com/aeon022/missionctl-core/lastsync"
 	"github.com/aeon022/missionctl-core/overlay"
+	"github.com/aeon022/missionctl-core/palette"
 	"github.com/aeon022/missionctl-core/theme"
 	"github.com/aeon022/missionctl-core/uistate"
 	"github.com/charmbracelet/bubbles/spinner"
@@ -163,6 +164,10 @@ type Model struct {
 	searchQ      string
 	searching    bool
 	searchInput  textinput.Model
+	// ":" command palette
+	inPalette     bool
+	paletteInput  textinput.Model
+	paletteCursor int
 
 	// batch select mode ("v") — bulk mark-read / bulk-delete, same pattern
 	// taskctl's own select mode uses.
@@ -215,6 +220,28 @@ type Model struct {
 	helpPopH int
 }
 
+// ── command palette (":") ────────────────────────────────────────────────────
+//
+// Types out full words instead of memorizing single-key shortcuts. Reuses
+// the exact same key handling every shortcut already goes through
+// (updateList) by replaying the mapped keypress, so behavior is guaranteed
+// identical to typing the key directly. Matching logic lives in
+// missionctl-core/palette (shared across the suite); this list is
+// mailctl-specific.
+var paletteCommands = []palette.Command{
+	{Name: "new", Desc: "New message", Key: "n"},
+	{Name: "open", Desc: "Open message", Key: "enter"},
+	{Name: "openapp", Desc: "Open in Mail.app", Key: "o"},
+	{Name: "delete", Desc: "Delete (press again to confirm)", Key: "d"},
+	{Name: "copy", Desc: "Copy subject + sender to clipboard", Key: "y"},
+	{Name: "select", Desc: "Select mode (batch actions)", Key: "v"},
+	{Name: "unread", Desc: "Toggle unread-only filter", Key: "u"},
+	{Name: "sync", Desc: "Sync", Key: "s"},
+	{Name: "search", Desc: "Search messages", Key: "/"},
+	{Name: "help", Desc: "Show help", Key: "?"},
+	{Name: "quit", Desc: "Quit mailctl", Key: "q"},
+}
+
 func New() Model {
 	sp := spinner.New()
 	sp.Spinner = spinner.MiniDot
@@ -223,6 +250,10 @@ func New() Model {
 	si := textinput.New()
 	si.Placeholder = "search…"
 	si.CharLimit = 200
+
+	pi := textinput.New()
+	pi.Placeholder = "command…"
+	pi.CharLimit = 40
 
 	to := textinput.New()
 	to.Placeholder = "to@example.com"
@@ -248,6 +279,7 @@ func New() Model {
 	return Model{
 		sp:                    sp,
 		searchInput:           si,
+		paletteInput:          pi,
 		toInput:               to,
 		subjectInput:          sub,
 		attachInput:           att,
@@ -518,6 +550,52 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.inPalette {
+		closePalette := func(mm Model) Model {
+			mm.inPalette = false
+			mm.paletteInput.Blur()
+			mm.paletteInput.SetValue("")
+			mm.paletteCursor = 0
+			return mm
+		}
+		switch msg.String() {
+		case "ctrl+c":
+			return m, tea.Quit
+		case "esc":
+			return closePalette(m), nil
+		case "up", "ctrl+p":
+			if m.paletteCursor > 0 {
+				m.paletteCursor--
+			}
+			return m, nil
+		case "down", "ctrl+n":
+			matches := palette.Match(paletteCommands, m.paletteInput.Value())
+			if m.paletteCursor < len(matches)-1 {
+				m.paletteCursor++
+			}
+			return m, nil
+		case "enter":
+			matches := palette.Match(paletteCommands, m.paletteInput.Value())
+			if len(matches) == 0 {
+				return closePalette(m), nil
+			}
+			if m.paletteCursor >= len(matches) {
+				m.paletteCursor = len(matches) - 1
+			}
+			chosen := matches[m.paletteCursor]
+			m = closePalette(m)
+			replay := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(chosen.Key)}
+			if chosen.Key == "enter" {
+				replay = tea.KeyMsg{Type: tea.KeyEnter}
+			}
+			return m.updateList(replay)
+		}
+		var cmd tea.Cmd
+		m.paletteInput, cmd = m.paletteInput.Update(msg)
+		m.paletteCursor = 0
+		return m, cmd
+	}
+
 	if m.searching {
 		switch msg.String() {
 		case "enter":
@@ -732,6 +810,11 @@ func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.cursor = 0
 		m.saveUIState()
 		return m, loadMsgsCmd(m.unreadOnly, m.activeAccount())
+	case ":":
+		m.inPalette = true
+		m.paletteCursor = 0
+		m.paletteInput.SetValue("")
+		return m, m.paletteInput.Focus()
 	case "/":
 		m.searching = true
 		m.searchInput.Focus()
@@ -957,6 +1040,7 @@ func (m Model) helpContent() string {
 		Row("u", "toggle unread-only filter").
 		Row("s", "sync").
 		Row("/", "search (esc clears)").
+		Row(":", "command palette — type an action by name").
 		Row("?", "toggle this help").
 		Row("q", "quit").
 		String()
@@ -1073,6 +1157,27 @@ func (m Model) renderList() string {
 	// ── search input ──
 	if m.searching {
 		b.WriteString("  " + m.searchInput.View() + "\n\n")
+	}
+
+	// ── command palette ──
+	if m.inPalette {
+		b.WriteString("  " + m.paletteInput.View() + "\n")
+		matches := palette.Match(paletteCommands, m.paletteInput.Value())
+		if len(matches) > 6 {
+			matches = matches[:6]
+		}
+		if len(matches) == 0 {
+			b.WriteString("    " + styleHelp.Render("no matching command") + "\n")
+		}
+		for i, c := range matches {
+			row := fmt.Sprintf("%-9s %s", c.Name, c.Desc)
+			if i == m.paletteCursor {
+				b.WriteString("    " + styleSelected.Render("▶ "+row) + "\n")
+			} else {
+				b.WriteString("      " + styleHelp.Render(row) + "\n")
+			}
+		}
+		b.WriteString("\n")
 	}
 
 	// ── message list ──
@@ -1663,6 +1768,9 @@ func (m Model) listStartY() int {
 	}
 	if m.searching {
 		y += 2
+	}
+	if m.inPalette {
+		y += 8
 	}
 	return y
 }

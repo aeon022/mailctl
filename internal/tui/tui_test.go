@@ -7,6 +7,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/aeon022/mailctl/internal/models"
+	"github.com/aeon022/missionctl-core/palette"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -122,6 +123,49 @@ func TestStripVariationSelectorsAgreeOnWidth(t *testing.T) {
 	}
 	if lipgloss.Width(got) != runewidth.StringWidth(got) {
 		t.Errorf("after stripping, lipgloss.Width(%q)=%d and runewidth.StringWidth=%d should agree, but don't", got, lipgloss.Width(got), runewidth.StringWidth(got))
+	}
+}
+
+func TestCommandPalette_TypeFilterAndExecute(t *testing.T) {
+	m := New()
+	m.width, m.height = 100, 30
+
+	mi, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(":")})
+	m = mi.(Model)
+	if !m.inPalette {
+		t.Fatal("expected inPalette after ':'")
+	}
+
+	for _, r := range "un" {
+		mi, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		m = mi.(Model)
+	}
+	matches := palette.Match(paletteCommands, m.paletteInput.Value())
+	if len(matches) == 0 || matches[0].Name != "unread" {
+		t.Fatalf("expected 'unread' to be the top match for query %q, got %v", m.paletteInput.Value(), matches)
+	}
+
+	before := m.unreadOnly
+	mi, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mi.(Model)
+	if m.inPalette {
+		t.Error("expected palette to close after executing a command")
+	}
+	if m.unreadOnly == before {
+		t.Error("expected 'unread' command to replay 'u' and flip unreadOnly")
+	}
+}
+
+func TestCommandPalette_EscCloses(t *testing.T) {
+	m := New()
+	m.width, m.height = 100, 30
+	mi, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(":")})
+	m = mi.(Model)
+
+	mi, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = mi.(Model)
+	if m.inPalette {
+		t.Error("expected esc to close the palette")
 	}
 }
 
