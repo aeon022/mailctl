@@ -145,11 +145,42 @@ end tell
 }
 
 // FetchMessageBody fetches the full body of a single message by subject+sender.
-// Searches inbox mailboxes first ("INBOX"/"Posteingang"), then all mailboxes.
-func FetchMessageBody(subject, from string) (string, error) {
+// account, if known (the caller already has it from the synced message list),
+// narrows the first-pass search to that one account's inbox instead of looping
+// through every account — the previous version always scanned accounts in
+// Mail.app's iteration order regardless of which one the message actually
+// belonged to, which meant every open paid for N-1 wasted account scans
+// whenever the matching account wasn't first. Falls back to the old
+// every-account, every-mailbox scan if account is empty or the message isn't
+// found there (e.g. it moved to Sent/Archive/Trash since last sync).
+func FetchMessageBody(account, subject, from string) (string, error) {
+	accountBlock := ""
+	if account != "" {
+		accountBlock = fmt.Sprintf(`
+	try
+		set targetAccount to account "%s"
+		repeat with mb in mailboxes of targetAccount
+			if (name of mb) is in inboxNames then
+				try
+					set msgs to (messages of mb whose subject is "%s")
+					repeat with m in msgs
+						try
+							if sender of m contains "%s" then
+								return content of m
+							end if
+						end try
+					end repeat
+				end try
+				exit repeat
+			end if
+		end repeat
+	end try
+`, escapeAS(account), escapeAS(subject), escapeAS(from))
+	}
 	script := fmt.Sprintf(`
 tell application "Mail"
 	set inboxNames to {"INBOX", "Posteingang", "Inbox"}
+%s
 	-- check inbox of each account first (fastest path)
 	repeat with a in accounts
 		try
@@ -187,7 +218,7 @@ tell application "Mail"
 	end repeat
 	return ""
 end tell
-`, escapeAS(subject), escapeAS(from), escapeAS(subject), escapeAS(from))
+`, accountBlock, escapeAS(subject), escapeAS(from), escapeAS(subject), escapeAS(from))
 	return runAppleScript(script)
 }
 

@@ -1372,9 +1372,9 @@ func syncCmd() tea.Cmd {
 }
 
 func loadBodyCmd(msg *models.Message) tea.Cmd {
-	subject, from := msg.Subject, msg.From
+	account, subject, from := msg.Account, msg.Subject, msg.From
 	return func() tea.Msg {
-		body, err := mail.FetchMessageBody(subject, from)
+		body, err := mail.FetchMessageBody(account, subject, from)
 		return bodyLoadedMsg{body: body, err: err}
 	}
 }
