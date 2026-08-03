@@ -15,6 +15,7 @@ import (
 	"github.com/aeon022/mailctl/internal/store"
 	"github.com/aeon022/mailctl/internal/templates"
 	"github.com/aeon022/missionctl-core/humanize"
+	"github.com/aeon022/missionctl-core/keymap"
 	"github.com/aeon022/missionctl-core/lastsync"
 	"github.com/aeon022/missionctl-core/overlay"
 	"github.com/aeon022/missionctl-core/theme"
@@ -939,30 +940,26 @@ func (m Model) View() string {
 }
 
 func (m Model) helpContent() string {
-	key := func(k string) string { return styleHeader.Render(fmt.Sprintf("%-11s", k)) }
-	row := func(k, desc string) string { return "  " + key(k) + styleMeta.Render(desc) + "\n" }
-	section := func(t string) string { return "\n  " + styleHeader.Render(t) + "\n" }
-
-	var b strings.Builder
-	b.WriteString(section("Navigation"))
-	b.WriteString(row("j / k", "move down / up"))
-	b.WriteString(row("g / G", "jump to top / bottom"))
-	b.WriteString(row("pgdn/pgup", "page down / up"))
-	b.WriteString(row("tab", "next account"))
-	b.WriteString(row("shift+tab", "previous account"))
-	b.WriteString(section("Messages"))
-	b.WriteString(row("enter", "open message"))
-	b.WriteString(row("n", "new message"))
-	b.WriteString(row("o", "open in Mail.app"))
-	b.WriteString(row("d", "delete (asks to confirm)"))
-	b.WriteString(row("y", "copy subject + sender to clipboard"))
-	b.WriteString(section("Other"))
-	b.WriteString(row("u", "toggle unread-only filter"))
-	b.WriteString(row("s", "sync"))
-	b.WriteString(row("/", "search (esc clears)"))
-	b.WriteString(row("?", "toggle this help"))
-	b.WriteString(row("q", "quit"))
-	return b.String()
+	return keymap.New("mailctl", "email from the terminal").
+		Section("Navigation").
+		Row("j / k", "move down / up").
+		Row("g / G", "jump to top / bottom").
+		Row("pgdn/up", "page down / up").
+		Row("tab", "next account").
+		Row("s-tab", "previous account").
+		Section("Messages").
+		Row("enter", "open message").
+		Row("n", "new message").
+		Row("o", "open in Mail.app").
+		Row("d", "delete (asks to confirm)").
+		Row("y", "copy subject + sender to clipboard").
+		Section("Other").
+		Row("u", "toggle unread-only filter").
+		Row("s", "sync").
+		Row("/", "search (esc clears)").
+		Row("?", "toggle this help").
+		Row("q", "quit").
+		String()
 }
 
 // openHelp sizes and populates the transient help popup (see
