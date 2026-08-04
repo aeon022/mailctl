@@ -437,7 +437,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.replyTo = m.detail
 			m.resetCompose(extractEmail(m.detail.From), replySubject)
 			m.bodyArea.SetValue(msg.body)
-			m.setStatus("Claude drafted a reply — review and ctrl+s to send")
+			m.setStatus("AI drafted a reply — review and ctrl+s to send")
 			m.view = viewCompose
 		}
 		return m, nil
@@ -915,8 +915,12 @@ func (m Model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "a":
 		if m.detail != nil && !m.aiDrafting {
+			if !config.IsPro() {
+				m.setStatus("AI draft reply is a missionctl Bundle feature — see missionctl.sh/#pricing")
+				return m, nil
+			}
 			m.aiDrafting = true
-			m.setStatus("Claude is drafting a reply…")
+			m.setStatus("Drafting a reply…")
 			detail := m.detail
 			return m, tea.Batch(m.sp.Tick, func() tea.Msg {
 				body, err := ai.Draft(detail.Subject, detail.Body)
@@ -1281,7 +1285,11 @@ func (m Model) renderDetail() string {
 	}
 	b.WriteString(styleHelp.Render(helpLine))
 	if m.aiDrafting {
-		b.WriteString("\n  " + m.sp.View() + styleSyncing.Render(" Claude is drafting a reply…"))
+		b.WriteString("\n  " + m.sp.View() + styleSyncing.Render(" Drafting a reply…"))
+	} else if m.err != nil {
+		b.WriteString("\n  " + styleErr.Render("✗ "+m.err.Error()))
+	} else if m.status != "" {
+		b.WriteString("\n  " + styleOK.Render("✓ "+m.status))
 	}
 	return lipgloss.NewStyle().Padding(detailPadV, detailPadH).Render(b.String())
 }

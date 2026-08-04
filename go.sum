@@ -1,9 +1,7 @@
 github.com/MakeNowJust/heredoc v1.0.0 h1:cXCdzVdstXyiTqTvfqk9SDHpKNjxuom+DOlyEeQ4pzQ=
 github.com/MakeNowJust/heredoc v1.0.0/go.mod h1:mG5amYoWBHf8vpLOuehzbGGw0EHxpZZ6lCpQ4fNJ8LE=
-github.com/aeon022/missionctl-core v0.0.0-20260802150042-e2881ef3fdcf h1:qWoXbKw1nufa+nP5DrRzNe/s6glgVLIPDWFnPKSxhW8=
-github.com/aeon022/missionctl-core v0.0.0-20260802150042-e2881ef3fdcf/go.mod h1:RWHy562XcOs9idgzJRMUOmuYjjRyo6KUSl10bS0AZ5M=
-github.com/aeon022/missionctl-core v0.0.0-20260803153211-6cf4fcc352f5 h1:MAgPwKMbRKoxRIJdJRxlLsFYiz2OtBoyUsSEcu9veXU=
-github.com/aeon022/missionctl-core v0.0.0-20260803153211-6cf4fcc352f5/go.mod h1:RWHy562XcOs9idgzJRMUOmuYjjRyo6KUSl10bS0AZ5M=
+github.com/aeon022/missionctl-core v0.0.0-20260804113215-ff40e6528d77 h1:+lxnE1Hi4g9kSkRX/epP7txp4eMAhVGGs08VDgzh9qQ=
+github.com/aeon022/missionctl-core v0.0.0-20260804113215-ff40e6528d77/go.mod h1:ne5u+XkfjhUTZVAaih66VqQu2U81fMO0FdzBOz8s8WY=
 github.com/anthropics/anthropic-sdk-go v1.57.0 h1:iEAcPbUKfJ2Iqz9uN/jEndCNW2+x7OYLHDidXDhPjI0=
 github.com/anthropics/anthropic-sdk-go v1.57.0/go.mod h1:3EfIfmFqxH6rbiLcIP4tPFyXL/IHakx2wDG4OU+TIEI=
 github.com/atotto/clipboard v0.1.4 h1:EH0zSVneZPSuFR11BlR9YppQTVDbh5+16AmcJi4g1z4=
@@ -91,6 +89,8 @@ github.com/muesli/termenv v0.16.0 h1:S5AlUN9dENB57rsbnkPyfdGuWIlkmzJjbFf0Tf5FWUc
 github.com/muesli/termenv v0.16.0/go.mod h1:ZRfOIKPFDYQoDFF4Olj7/QJbW60Ol/kL1pU3VfY/Cnk=
 github.com/ncruces/go-strftime v1.0.0 h1:HMFp8mLCTPp341M/ZnA4qaf7ZlsbTc+miZjCLOFAw7w=
 github.com/ncruces/go-strftime v1.0.0/go.mod h1:Fwc5htZGVVkseilnfgOVb9mKy6w1naJmn9CehxcKcls=
+github.com/openai/openai-go v1.12.0 h1:NBQCnXzqOTv5wsgNC36PrFEiskGfO5wccfCWDo9S1U0=
+github.com/openai/openai-go v1.12.0/go.mod h1:g461MYGXEXBVdV5SaR/5tNzNbSfwTBBefwc+LlDCK0Y=
 github.com/pb33f/ordered-map/v2 v2.3.1 h1:5319HDO0aw4DA4gzi+zv4FXU9UlSs3xGZ40wcP1nBjY=
 github.com/pb33f/ordered-map/v2 v2.3.1/go.mod h1:qxFQgd0PkVUtOMCkTapqotNgzRhMPL7VvaHKbd1HnmQ=
 github.com/pelletier/go-toml/v2 v2.2.4 h1:mye9XuhQ6gvn5h28+VilKrrPoQVanw5PMw/TB0t5Ec4=

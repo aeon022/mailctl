@@ -175,6 +175,17 @@ mailctl mcp
 
 ---
 
+### `mailctl license`
+
+Activate or check your [missionctl Bundle](https://missionctl.sh/#pricing) license, which unlocks the `a` (AI draft reply) key.
+
+```bash
+mailctl license activate <key>
+mailctl license status
+```
+
+---
+
 ## TUI Keys
 
 ### List view
@@ -201,6 +212,7 @@ mailctl mcp
 | `esc` | Back to list |
 | `j` / `k` or `↑` / `↓` | Scroll body |
 | `r` | Reply (opens compose with quoted text) |
+| `a` | AI draft reply (missionctl Bundle feature, see Requirements) |
 | `u` | Mark as unread |
 | `U` | Open unsubscribe link in browser (shown only when detected) |
 | `d` | Delete message |
@@ -351,6 +363,7 @@ Once set, mailctl automatically switches its SQLite journal mode from WAL to rol
 
 - macOS with Apple Mail configured and at least one account
 - Go 1.21+
+- The `a` (AI draft reply) key requires an active [missionctl Bundle](https://missionctl.sh/#pricing) license (`mailctl license activate <key>`), plus one of: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, a free `GEMINI_API_KEY` ([aistudio.google.com/apikey](https://aistudio.google.com/apikey), no card required), or a locally running [Ollama](https://ollama.com) — auto-detected in that order, override with `MAILCTL_PROVIDER`. Everything else works fully without a license or any of these.
 
 ## License
 
