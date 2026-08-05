@@ -5,43 +5,55 @@ import (
 	"path/filepath"
 
 	coreconfig "github.com/aeon022/missionctl-core/config"
+	"github.com/aeon022/missionctl-core/licensing"
 	"github.com/spf13/viper"
 )
 
 type Config struct {
-	DefaultAccount string `mapstructure:"default_account"`
-	DefaultFrom    string `mapstructure:"default_from"`
-	InboxMailbox   string `mapstructure:"inbox_mailbox"`
-	SyncCount      int    `mapstructure:"sync_count"` // messages to sync per account
-	DataDir        string `mapstructure:"data_dir"`
-	LicenseKey     string `mapstructure:"license_key"`
-	LicenseStatus  string `mapstructure:"license_status"`
+	DefaultAccount   string `mapstructure:"default_account"`
+	DefaultFrom      string `mapstructure:"default_from"`
+	InboxMailbox     string `mapstructure:"inbox_mailbox"`
+	SyncCount        int    `mapstructure:"sync_count"` // messages to sync per account
+	DataDir          string `mapstructure:"data_dir"`
+	LicenseKey       string `mapstructure:"license_key"`
+	LicenseStatus    string `mapstructure:"license_status"`
+	LicenseBenefitID string `mapstructure:"license_benefit_id"`
 }
 
-// defaultPolarOrgID is aeon022's Polar.sh organization — shared across the
-// missionctl suite, same as postctl's.
-const defaultPolarOrgID = "aa792ea4-650e-492e-a955-9b3d564e943e"
+// bundleBenefitID and mailctlBenefitID identify the missionctl Bundle's and
+// mailctl's own individual-product license-key benefits in Polar. Both
+// start empty (the mailctl-only product doesn't exist in Polar yet) — see
+// licensing.Result.Grants: empty IDs fall back to "any active key under
+// our org grants access", so this is a no-op until both are filled in
+// once the individual product is created and its benefit ID is known.
+const (
+	bundleBenefitID  = ""
+	mailctlBenefitID = ""
+)
 
-// IsPro reports whether a valid Pro/Bundle license is active on this
-// machine — gates the AI draft-reply feature (the `a` key).
+// IsPro reports whether a valid Pro/Bundle or mailctl-only license is
+// active on this machine — gates the AI draft-reply feature (the `a` key).
 func IsPro() bool {
-	return Active.LicenseStatus == "active"
+	result := licensing.Result{Status: Active.LicenseStatus, BenefitID: Active.LicenseBenefitID}
+	return result.Grants(mailctlBenefitID, bundleBenefitID)
 }
 
 func PolarOrgID() string {
 	if v := viper.GetString("polar_org_id"); v != "" {
 		return v
 	}
-	return defaultPolarOrgID
+	return licensing.DefaultOrgID
 }
 
-// SetLicense persists the license key/status to
+// SetLicense persists the license key/status/benefit to
 // ~/.config/mailctl/config.yaml and updates Active immediately.
-func SetLicense(key, status string) error {
+func SetLicense(key, status, benefitID string) error {
 	viper.Set("license_key", key)
 	viper.Set("license_status", status)
+	viper.Set("license_benefit_id", benefitID)
 	Active.LicenseKey = key
 	Active.LicenseStatus = status
+	Active.LicenseBenefitID = benefitID
 	home, _ := os.UserHomeDir()
 	cfgDir := filepath.Join(home, ".config", "mailctl")
 	if err := os.MkdirAll(cfgDir, 0755); err != nil {
