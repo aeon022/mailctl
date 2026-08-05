@@ -27,8 +27,8 @@ type Config struct {
 // our org grants access", so this is a no-op until both are filled in
 // once the individual product is created and its benefit ID is known.
 const (
-	bundleBenefitID  = ""
-	mailctlBenefitID = ""
+	bundleBenefitID  = "de1be860-1dfc-43da-99a8-206fb2573f09"
+	mailctlBenefitID = "1b50057f-0f52-4b31-a89b-9d77eda8abae"
 )
 
 // IsPro reports whether a valid Pro/Bundle or mailctl-only license is
