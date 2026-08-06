@@ -361,9 +361,17 @@ end tell`, messageID)
 	return err
 }
 
-// DeleteInMail moves a message to Trash in Apple Mail.
+// DeleteInMail moves a message to Trash in Apple Mail. Returns an error if
+// no message with this id was found in any mailbox — the previous version
+// had no way to signal that: the per-mailbox `try` only guarded against a
+// single mailbox erroring on the whose-search, and if the id matched
+// nothing anywhere the script just finished normally, reporting success
+// while deleting nothing. Callers then removed the local cache row
+// regardless, orphaning the real message in Apple Mail, untracked. Same bug
+// class fixed in calctl's DeleteEvent on 2026-08-01.
 func DeleteInMail(messageID string) error {
 	script := fmt.Sprintf(`
+set wasDeleted to false
 tell application "Mail"
 	repeat with a in accounts
 		repeat with mbox in mailboxes of a
@@ -371,14 +379,23 @@ tell application "Mail"
 				set found to (messages of mbox whose message id is %q)
 				if (count of found) > 0 then
 					delete item 1 of found
-					return
+					set wasDeleted to true
+					exit repeat
 				end if
 			end try
 		end repeat
+		if wasDeleted then exit repeat
 	end repeat
-end tell`, messageID)
-	_, err := runAppleScript(script)
-	return err
+end tell
+return wasDeleted as string`, messageID)
+	out, err := runAppleScript(script)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(out) != "true" {
+		return fmt.Errorf("no message found with id %q in any mailbox", messageID)
+	}
+	return nil
 }
 
 // OpenInMail activates Apple Mail and opens the message with the given message-id.

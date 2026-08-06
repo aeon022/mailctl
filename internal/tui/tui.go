@@ -1554,6 +1554,15 @@ func markUnreadCmd(id string) tea.Cmd {
 
 func deleteCmd(id string) tea.Cmd {
 	return func() tea.Msg {
+		// Real Apple Mail delete first, local cache row only removed once
+		// that actually succeeds — used to delete the cache row
+		// unconditionally and discard DeleteInMail's error, which on a
+		// failure (stale id, message already gone) left the real message
+		// alive in Mail while the cache said it was gone. Same bug class
+		// fixed in calctl's DeleteEvent on 2026-08-01.
+		if err := mail.DeleteInMail(id); err != nil {
+			return deletedMsg{err}
+		}
 		s, err := store.New(config.DBPath(), config.Shared())
 		if err != nil {
 			return deletedMsg{err}
@@ -1562,7 +1571,6 @@ func deleteCmd(id string) tea.Cmd {
 		if err := s.DeleteMessage(context.Background(), id); err != nil {
 			return deletedMsg{err}
 		}
-		_ = mail.DeleteInMail(id)
 		return deletedMsg{}
 	}
 }
@@ -1616,11 +1624,16 @@ func batchDeleteCmd(ids []string) tea.Cmd {
 		ctx := context.Background()
 		var lastErr error
 		for _, id := range ids {
-			if err := s.DeleteMessage(ctx, id); err != nil {
+			// Same real-delete-before-cache-delete ordering as deleteCmd —
+			// skip the cache row entirely if Apple Mail's delete fails,
+			// instead of discarding that error and dropping the row anyway.
+			if err := mail.DeleteInMail(id); err != nil {
 				lastErr = err
 				continue
 			}
-			_ = mail.DeleteInMail(id)
+			if err := s.DeleteMessage(ctx, id); err != nil {
+				lastErr = err
+			}
 		}
 		return deletedMsg{lastErr}
 	}
