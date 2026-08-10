@@ -3,10 +3,12 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/aeon022/mailctl/internal/config"
 	"github.com/aeon022/mailctl/internal/mail"
 	"github.com/aeon022/mailctl/internal/store"
+	"github.com/aeon022/missionctl-core/lastsync"
 	"github.com/spf13/cobra"
 )
 
@@ -32,6 +34,7 @@ var syncCmd = &cobra.Command{
 		for i := range msgs {
 			_ = s.UpsertMessage(ctx, &msgs[i])
 		}
+		_ = lastsync.Save(config.LastSyncedPath(), time.Now())
 
 		if isJSON() {
 			outputJSON(map[string]any{
