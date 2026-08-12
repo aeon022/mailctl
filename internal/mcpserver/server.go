@@ -76,7 +76,7 @@ func toolDraft() mcp.Tool {
 func toolSync() mcp.Tool {
 	return mcp.NewTool("sync_inbox",
 		mcp.WithDescription("Sync the inbox from Apple Mail into the local cache. Call this if the inbox data seems stale."),
-		mcp.WithNumber("count", mcp.Description("Messages to sync per account (default 100)")),
+		mcp.WithNumber("count", mcp.Description("Messages to sync per account (default 50)")),
 	)
 }
 
@@ -164,7 +164,7 @@ func handleDraft(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResul
 }
 
 func handleSync(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	count := int(req.GetFloat("count", 100))
+	count := int(req.GetFloat("count", 50))
 	msgs, err := mail.FetchInbox(count, false)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil

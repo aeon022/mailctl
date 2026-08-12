@@ -49,6 +49,6 @@ var syncCmd = &cobra.Command{
 }
 
 func init() {
-	syncCmd.Flags().IntVar(&syncCount, "count", 150, "Messages to sync per account")
+	syncCmd.Flags().IntVar(&syncCount, "count", 50, "Messages to sync per account")
 	rootCmd.AddCommand(syncCmd)
 }
