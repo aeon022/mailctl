@@ -2266,13 +2266,6 @@ func extractEmail(s string) string {
 	return strings.TrimSpace(s)
 }
 
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
 // findUnsubscribeURL scans an email body for a URL near an "unsubscribe" keyword.
 func findUnsubscribeURL(body string) string {
 	lower := strings.ToLower(body)
@@ -2318,9 +2311,3 @@ func openURLCmd(url string) tea.Cmd {
 	}
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}

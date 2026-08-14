@@ -10,10 +10,6 @@ import (
 )
 
 type Config struct {
-	DefaultAccount   string `mapstructure:"default_account"`
-	DefaultFrom      string `mapstructure:"default_from"`
-	InboxMailbox     string `mapstructure:"inbox_mailbox"`
-	SyncCount        int    `mapstructure:"sync_count"` // messages to sync per account
 	DataDir          string `mapstructure:"data_dir"`
 	LicenseKey       string `mapstructure:"license_key"`
 	LicenseStatus    string `mapstructure:"license_status"`
@@ -74,11 +70,6 @@ func Load() error {
 	viper.AddConfigPath(cfgDir)
 	viper.SetEnvPrefix("MAILCTL")
 	viper.AutomaticEnv()
-
-	viper.SetDefault("default_account", "")
-	viper.SetDefault("default_from", "")
-	viper.SetDefault("inbox_mailbox", "INBOX")
-	viper.SetDefault("sync_count", 100)
 
 	if err := viper.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
