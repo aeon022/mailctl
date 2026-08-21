@@ -2128,26 +2128,34 @@ func formatListRow(msg *models.Message, width int, showAcct bool, rowStyle lipgl
 	return row
 }
 
-// stripVariationSelectors removes U+FE0E/U+FE0F. Real email bodies
-// occasionally contain emoji+variation-selector sequences (e.g. "🏖️"),
-// and terminal width libraries disagree on how wide those render — the
-// same disagreement that misaligned notectl's scrollbar. Stripping the
-// selector removes the disagreement at its source instead of trying to
-// reconcile width functions.
 // stripVariationSelectors removes characters whose display width is
 // ambiguous or undefined across terminals/fonts, rather than trying to
 // measure and wrap around them correctly: U+FE0E/FE0F (emoji variation
-// selectors \u2014 a real width mismatch already caused a scrollbar-alignment
+// selectors — a real width mismatch already caused a scrollbar-alignment
 // bug, see the regression test) and U+FFFC (the object-replacement
 // character HTML mail leaves behind for an inline image/attachment once
-// stripped to plain text \u2014 it has no meaningful width or content once
+// stripped to plain text — it has no meaningful width or content once
 // there's no image to show, and different terminals render it at
 // different widths, which can misalign a terminal's own cursor tracking
 // on lines further down the same frame).
+//
+// It also normalizes U+2028/U+2029 (line/paragraph separator) to '\n'.
+// Apple Mail's HTML-to-plaintext conversion uses these for soft line
+// breaks inside a paragraph — live-reproduced in a real Coinbase price
+// alert full of them. formatDetail only splits on '\n', so a line
+// carrying an embedded U+2028 was one row to the app's row-accounting
+// (go-runewidth measures it as width 0) but could force an actual line
+// break when the terminal renders it, desyncing the scrollbar/viewport
+// from everything drawn after the first occurrence — exactly why it only
+// showed up in long, multi-paragraph emails. Converting them to '\n' up
+// front makes every row the app counts match a row the terminal draws.
 func stripVariationSelectors(s string) string {
 	return strings.Map(func(r rune) rune {
-		if r == '\uFE0E' || r == '\uFE0F' || r == '\uFFFC' {
+		switch r {
+		case '\uFE0E', '\uFE0F', '\uFFFC':
 			return -1
+		case '\u2028', '\u2029':
+			return '\n'
 		}
 		return r
 	}, s)

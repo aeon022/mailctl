@@ -130,6 +130,28 @@ func TestStripVariationSelectorsAgreeOnWidth(t *testing.T) {
 	}
 }
 
+// TestStripVariationSelectorsNormalizesLineSeparators is a regression test
+// for a real, live-reproduced bug: Apple Mail's HTML-to-plaintext
+// conversion left U+2028 (LINE SEPARATOR) embedded mid-paragraph in a real
+// Coinbase price-alert email, inside text formatDetail treats as a single
+// '\n'-delimited line. go-runewidth measures U+2028 as width 0, but it can
+// force an actual line break when a terminal renders it — desyncing the
+// app's row count (and the scrollbar drawn against it) from what the
+// terminal actually draws, for every row after the first occurrence. Only
+// showed up in long, multi-paragraph emails, which is exactly where Apple
+// Mail needs internal soft-wraps. Normalizing to '\n' up front removes the
+// hidden control character from the stream entirely.
+func TestStripVariationSelectorsNormalizesLineSeparators(t *testing.T) {
+	in := "one\u2028two\u2029three"
+	got := stripVariationSelectors(in)
+	if strings.ContainsRune(got, '\u2028') || strings.ContainsRune(got, '\u2029') {
+		t.Errorf("stripVariationSelectors(%q) = %q, still contains a line/paragraph separator", in, got)
+	}
+	if want := "one\ntwo\nthree"; got != want {
+		t.Errorf("stripVariationSelectors(%q) = %q, want %q", in, got, want)
+	}
+}
+
 func TestCommandPalette_TypeFilterAndExecute(t *testing.T) {
 	m := New()
 	m.width, m.height = 100, 30
