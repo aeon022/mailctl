@@ -1300,7 +1300,7 @@ func (m Model) renderDetail() string {
 	b.WriteString(renderScrollbar(m.vp))
 
 	// ── footer ──
-	b.WriteString("\n" + styleDivider.Render(strings.Repeat("─", w)) + "\n")
+	b.WriteString("\n\n" + styleDivider.Render(strings.Repeat("─", w)) + "\n")
 	helpLine := "esc:back  r:reply  a:ai draft  u:unread  d:delete  y:copy  o:mail  ↑↓/jk:scroll  q:quit"
 	if m.detail != nil && findUnsubscribeURL(m.detail.Body) != "" {
 		helpLine += "  U:unsubscribe"
@@ -1716,8 +1716,8 @@ func (m *Model) setStatus(s string) {
 // copy, is what viewport.Update() actually scrolls by).
 func (m Model) detailBodyHeight() int {
 	// subject(1) + from(1) + to(1) + date(1) + account(1) + divider(1)
-	// + footer-divider(1) + help(1) = 8
-	h := m.height - detailPadV*2 - 8
+	// + gap-before-footer(1) + footer-divider(1) + help(1) = 9
+	h := m.height - detailPadV*2 - 9
 	if h < 5 {
 		h = 5
 	}
@@ -2085,7 +2085,16 @@ func formatDetail(msg *models.Message, width int) string {
 	if body == "" {
 		return styleMeta.Render("(no body)")
 	}
-	w := min(width-2, 128) // leave room for scrollbar track
+	// Wrap width matches vp.Width exactly (both derive from detailRawWidth()-2),
+	// so a paragraph line that reaches the wrap boundary fills the viewport with
+	// zero slack before the scrollbar glyph. Some individual glyphs render a
+	// hair wider on-screen than Go's width libraries count them (font
+	// rendering, not a measurable logical-width bug — confirmed live: the
+	// ambiguous-width character theory checked out mathematically and still
+	// didn't fix a real, reproduced break). A real blank-column margin absorbs
+	// that regardless of which glyph or why, instead of chasing it per-character.
+	w := min(width-5, 128) // leave room for scrollbar track + margin
+
 	var lines []string
 	for _, l := range strings.Split(body, "\n") {
 		lines = append(lines, wrapByWidth(l, w)...)
