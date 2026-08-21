@@ -77,22 +77,79 @@ func formatAddressList(addrs []string) string {
 	return strings.Join(lines, "\n\t\t")
 }
 
+// appleMsgFields is the AppleScript snippet that formats one message's
+// header fields — the ID/SUBJECT/FROM/DATE/READ block parseMessages splits
+// on — appending each to the `output` accumulator. Assumes an AppleScript
+// variable `m` is bound to the current message. Shared by every builder
+// that dumps message headers (FetchInbox, SearchMessages, FetchThread),
+// which previously copy-pasted this ~15-line block with drift risk.
+const appleMsgFields = `
+					set mSubject to subject of m
+					set mFrom to sender of m
+					set mDate to date received of m
+					set mRead to read status of m
+					set mID to message id of m
+					set readStr to "0"
+					if mRead then set readStr to "1"
+					set yr to year of mDate as string
+					set mo to text -2 thru -1 of ("0" & ((month of mDate as integer) as string))
+					set dy to text -2 thru -1 of ("0" & (day of mDate as string))
+					set hr to text -2 thru -1 of ("0" & (hours of mDate as string))
+					set mn to text -2 thru -1 of ("0" & (minutes of mDate as string))
+					set sc to text -2 thru -1 of ("0" & (seconds of mDate as string))
+					set mDateStr to yr & "-" & mo & "-" & dy & "T" & hr & ":" & mn & ":" & sc
+					set output to output & "ID:" & mID & linefeed
+					set output to output & "SUBJECT:" & mSubject & linefeed
+					set output to output & "FROM:" & mFrom & linefeed
+					set output to output & "DATE:" & mDateStr & linefeed
+					set output to output & "READ:" & readStr & linefeed
+`
+
+// appleMsgTail closes out the record with the BODY placeholder (fetched
+// separately, on demand, via FetchMessageBody) and the "---MSG---"
+// delimiter parseMessages splits on.
+const appleMsgTail = `					set output to output & "BODY:" & linefeed
+					set output to output & "---MSG---" & linefeed
+`
+
+// appleMsgDump is the header-only record (no ACCOUNT line), for call sites
+// whose results already span multiple accounts merged into one list, e.g.
+// SearchMessages.
+const appleMsgDump = appleMsgFields + appleMsgTail
+
+// appleMsgDumpWithAccount adds the ACCOUNT field, for call sites iterating
+// per-account with an account variable "a" in scope.
+const appleMsgDumpWithAccount = appleMsgFields + `					set output to output & "ACCOUNT:" & (name of a) & linefeed
+` + appleMsgTail
+
 // FetchInbox returns recent message headers from all accounts' inboxes.
 // Body is NOT fetched here — use FetchMessageBody for on-demand loading.
+//
+// Unfiltered fetches (the common case — sync_inbox always calls this with
+// unreadOnly=false) use bounded index access (`message i of mbox`) instead
+// of `messages of mbox`, which materializes every message in the mailbox as
+// a list before the script ever slices it down to `count`. That's cheap for
+// a small inbox but became the dominant cost once real accounts here had
+// thousands of messages (Gmail 7652, one Exchange account 7917) —
+// AppleScript was building 7000+-element lists just to read the first 150.
+// `whose read status is false` still needs the full-list form since there's
+// no bounded-range equivalent for an arbitrary filter; that path stays
+// slow, but nothing in this codebase calls it with a large default count.
 func FetchInbox(count int, unreadOnly bool) ([]models.Message, error) {
-	// Unfiltered fetches (the common case — sync_inbox always calls this
-	// with unreadOnly=false) use bounded index access (`message i of mbox`)
-	// instead of `messages of mbox`, which materializes every message in
-	// the mailbox as a list before the script ever slices it down to
-	// `count`. That's cheap for a small inbox but became the dominant cost
-	// once real accounts here had thousands of messages (Gmail 7652, one
-	// Exchange account 7917) — AppleScript was building 7000+-element lists
-	// just to read the first 150. `whose read status is false` still needs
-	// the full-list form since there's no bounded-range equivalent for an
-	// arbitrary filter; that path stays slow, but nothing in this codebase
-	// calls it with a large default count.
+	selection := `
+				set msgCount to count of messages of mbox
+				if msgCount > %d then set msgCount to %d
+				repeat with i from 1 to msgCount
+					set m to message i of mbox
+`
 	if unreadOnly {
-		return fetchInboxFiltered(count)
+		selection = `
+				set msgs to (messages of mbox whose read status is false)
+				set msgCount to count of msgs
+				if msgCount > %d then set msgCount to %d
+				repeat with i from 1 to msgCount
+					set m to item i of msgs
+`
 	}
 	script := fmt.Sprintf(`
 tell application "Mail"
@@ -112,104 +169,13 @@ tell application "Mail"
 		if mbox is missing value then
 			-- skip accounts where no inbox-named mailbox was found
 		else
-			try
-				set msgCount to count of messages of mbox
-				if msgCount > %d then set msgCount to %d
-				repeat with i from 1 to msgCount
-					set m to message i of mbox
-					set mSubject to subject of m
-					set mFrom to sender of m
-					set mDate to date received of m
-					set mRead to read status of m
-					set mID to message id of m
-					set readStr to "0"
-					if mRead then set readStr to "1"
-					set yr to year of mDate as string
-					set mo to text -2 thru -1 of ("0" & ((month of mDate as integer) as string))
-					set dy to text -2 thru -1 of ("0" & (day of mDate as string))
-					set hr to text -2 thru -1 of ("0" & (hours of mDate as string))
-					set mn to text -2 thru -1 of ("0" & (minutes of mDate as string))
-					set sc to text -2 thru -1 of ("0" & (seconds of mDate as string))
-					set mDateStr to yr & "-" & mo & "-" & dy & "T" & hr & ":" & mn & ":" & sc
-					set output to output & "ID:" & mID & linefeed
-					set output to output & "SUBJECT:" & mSubject & linefeed
-					set output to output & "FROM:" & mFrom & linefeed
-					set output to output & "DATE:" & mDateStr & linefeed
-					set output to output & "READ:" & readStr & linefeed
-					set output to output & "ACCOUNT:" & (name of a) & linefeed
-					set output to output & "BODY:" & linefeed
-					set output to output & "---MSG---" & linefeed
-				end repeat
+			try`+selection+`%s				end repeat
 			end try
 		end if
 	end repeat
 	return output
 end tell
-`, count, count)
-	out, err := runAppleScript(script)
-	if err != nil {
-		return nil, err
-	}
-	return parseMessages(out, "INBOX"), nil
-}
-
-// fetchInboxFiltered is FetchInbox's unreadOnly path — kept as the old
-// full-list `whose` form since AppleScript has no bounded-range equivalent
-// for an arbitrary filter; every message's read status has to be evaluated
-// to know which ones qualify.
-func fetchInboxFiltered(count int) ([]models.Message, error) {
-	script := fmt.Sprintf(`
-tell application "Mail"
-	set output to ""
-	set inboxNames to {"INBOX", "Posteingang", "Inbox"}
-	repeat with a in accounts
-		set mbox to missing value
-		try
-			repeat with mb in mailboxes of a
-				if (name of mb) is in inboxNames then
-					set mbox to mb
-					exit repeat
-				end if
-			end repeat
-		end try
-		if mbox is missing value then
-			-- skip accounts where no inbox-named mailbox was found
-		else
-			try
-				set msgs to (messages of mbox whose read status is false)
-				set msgCount to count of msgs
-				if msgCount > %d then set msgCount to %d
-				repeat with i from 1 to msgCount
-					set m to item i of msgs
-					set mSubject to subject of m
-					set mFrom to sender of m
-					set mDate to date received of m
-					set mRead to read status of m
-					set mID to message id of m
-					set readStr to "0"
-					if mRead then set readStr to "1"
-					set yr to year of mDate as string
-					set mo to text -2 thru -1 of ("0" & ((month of mDate as integer) as string))
-					set dy to text -2 thru -1 of ("0" & (day of mDate as string))
-					set hr to text -2 thru -1 of ("0" & (hours of mDate as string))
-					set mn to text -2 thru -1 of ("0" & (minutes of mDate as string))
-					set sc to text -2 thru -1 of ("0" & (seconds of mDate as string))
-					set mDateStr to yr & "-" & mo & "-" & dy & "T" & hr & ":" & mn & ":" & sc
-					set output to output & "ID:" & mID & linefeed
-					set output to output & "SUBJECT:" & mSubject & linefeed
-					set output to output & "FROM:" & mFrom & linefeed
-					set output to output & "DATE:" & mDateStr & linefeed
-					set output to output & "READ:" & readStr & linefeed
-					set output to output & "ACCOUNT:" & (name of a) & linefeed
-					set output to output & "BODY:" & linefeed
-					set output to output & "---MSG---" & linefeed
-				end repeat
-			end try
-		end if
-	end repeat
-	return output
-end tell
-`, count, count)
+`, count, count, appleMsgDumpWithAccount)
 	out, err := runAppleScript(script)
 	if err != nil {
 		return nil, err
@@ -309,31 +275,10 @@ tell application "Mail"
 	if msgCount > %d then set msgCount to %d
 	repeat with i from 1 to msgCount
 		set m to item i of found
-		set mSubject to subject of m
-		set mFrom to sender of m
-		set mDate to date received of m
-		set mRead to read status of m
-		set mID to message id of m
-		set readStr to "0"
-		if mRead then set readStr to "1"
-		set yr to year of mDate as string
-		set mo to text -2 thru -1 of ("0" & ((month of mDate as integer) as string))
-		set dy to text -2 thru -1 of ("0" & (day of mDate as string))
-		set hr to text -2 thru -1 of ("0" & (hours of mDate as string))
-		set mn to text -2 thru -1 of ("0" & (minutes of mDate as string))
-		set sc to text -2 thru -1 of ("0" & (seconds of mDate as string))
-		set mDateStr to yr & "-" & mo & "-" & dy & "T" & hr & ":" & mn & ":" & sc
-		set output to output & "ID:" & mID & linefeed
-		set output to output & "SUBJECT:" & mSubject & linefeed
-		set output to output & "FROM:" & mFrom & linefeed
-		set output to output & "DATE:" & mDateStr & linefeed
-		set output to output & "READ:" & readStr & linefeed
-		set output to output & "BODY:" & linefeed
-		set output to output & "---MSG---" & linefeed
-	end repeat
+%s	end repeat
 	return output
 end tell
-`, escapeAS(query), count, count)
+`, escapeAS(query), count, count, appleMsgDump)
 	out, err := runAppleScript(script)
 	if err != nil {
 		return nil, err
@@ -354,35 +299,13 @@ tell application "Mail"
 				if msgCount > %d then set msgCount to %d
 				repeat with i from 1 to msgCount
 					set m to item i of msgs
-					set mSubject to subject of m
-					set mFrom to sender of m
-					set mDate to date received of m
-					set mRead to read status of m
-					set mID to message id of m
-					set readStr to "0"
-					if mRead then set readStr to "1"
-					set yr to year of mDate as string
-					set mo to text -2 thru -1 of ("0" & ((month of mDate as integer) as string))
-					set dy to text -2 thru -1 of ("0" & (day of mDate as string))
-					set hr to text -2 thru -1 of ("0" & (hours of mDate as string))
-					set mn to text -2 thru -1 of ("0" & (minutes of mDate as string))
-					set sc to text -2 thru -1 of ("0" & (seconds of mDate as string))
-					set mDateStr to yr & "-" & mo & "-" & dy & "T" & hr & ":" & mn & ":" & sc
-					set output to output & "ID:" & mID & linefeed
-					set output to output & "SUBJECT:" & mSubject & linefeed
-					set output to output & "FROM:" & mFrom & linefeed
-					set output to output & "DATE:" & mDateStr & linefeed
-					set output to output & "READ:" & readStr & linefeed
-					set output to output & "ACCOUNT:" & (name of a) & linefeed
-					set output to output & "BODY:" & linefeed
-					set output to output & "---MSG---" & linefeed
-				end repeat
+%s				end repeat
 			end try
 		end repeat
 	end repeat
 	return output
 end tell
-`, escapeAS(subject), count, count)
+`, escapeAS(subject), count, count, appleMsgDumpWithAccount)
 	out, err := runAppleScript(script)
 	if err != nil {
 		return nil, err

@@ -9,7 +9,6 @@ type Message struct {
 	To          []string  `json:"to"`
 	CC          []string  `json:"cc,omitempty"`
 	Body        string    `json:"body"`
-	BodyHTML    string    `json:"body_html,omitempty"`
 	Date        time.Time `json:"date"`
 	Read        bool      `json:"read"`
 	Mailbox     string    `json:"mailbox"`

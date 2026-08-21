@@ -1,13 +1,11 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 	"time"
 
 	"github.com/aeon022/mailctl/internal/config"
 	"github.com/aeon022/mailctl/internal/mail"
-	"github.com/aeon022/mailctl/internal/store"
 	"github.com/aeon022/missionctl-core/lastsync"
 	"github.com/spf13/cobra"
 )
@@ -18,21 +16,9 @@ var syncCmd = &cobra.Command{
 	Use:   "sync",
 	Short: "Sync inbox from Apple Mail into local cache",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		msgs, err := mail.FetchInbox(syncCount, false)
+		msgs, _, err := mail.SyncFromApple(syncCount)
 		if err != nil {
 			return fmt.Errorf("fetch: %w", err)
-		}
-
-		s, err := store.New(config.DBPath(), config.Shared())
-		if err != nil {
-			return err
-		}
-		defer s.Close()
-		ctx := context.Background()
-
-		_ = s.DeleteBySource(ctx, "apple")
-		for i := range msgs {
-			_ = s.UpsertMessage(ctx, &msgs[i])
 		}
 		_ = lastsync.Save(config.LastSyncedPath(), time.Now())
 

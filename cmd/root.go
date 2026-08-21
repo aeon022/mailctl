@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
 
 	"github.com/aeon022/mailctl/internal/config"
@@ -35,9 +34,4 @@ func outputJSON(v any) {
 
 func init() {
 	rootCmd.PersistentFlags().BoolVar(&jsonFlag, "json", false, "Output as JSON")
-}
-
-func fatalf(format string, args ...any) {
-	fmt.Fprintf(os.Stderr, "error: "+format+"\n", args...)
-	os.Exit(1)
 }

@@ -165,19 +165,9 @@ func handleDraft(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResul
 
 func handleSync(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	count := int(req.GetFloat("count", 50))
-	msgs, err := mail.FetchInbox(count, false)
+	msgs, _, err := mail.SyncFromApple(count)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
-	}
-	s, err := store.New(config.DBPath(), config.Shared())
-	if err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
-	}
-	defer s.Close()
-	ctx := context.Background()
-	_ = s.DeleteBySource(ctx, "apple")
-	for i := range msgs {
-		_ = s.UpsertMessage(ctx, &msgs[i])
 	}
 	return mcp.NewToolResultText(fmt.Sprintf("Synced %d messages", len(msgs))), nil
 }

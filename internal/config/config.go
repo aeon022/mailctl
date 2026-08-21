@@ -110,20 +110,23 @@ func Shared() bool {
 	return DBPathOverride == "" && viper.GetString("data_dir") != ""
 }
 
-// LastSyncedPath is the marker file (see missionctl-core/lastsync) tracking
-// when a sync last completed, for the TUI's "synced Xh ago" indicator.
-func LastSyncedPath() string {
+// appFile returns the path to name inside mailctl's private app-support
+// directory, creating that directory if needed.
+func appFile(name string) string {
 	home, _ := os.UserHomeDir()
 	dir := filepath.Join(home, "Library", "Application Support", "mailctl")
 	_ = os.MkdirAll(dir, 0755)
-	return filepath.Join(dir, "last_synced")
+	return filepath.Join(dir, name)
+}
+
+// LastSyncedPath is the marker file (see missionctl-core/lastsync) tracking
+// when a sync last completed, for the TUI's "synced Xh ago" indicator.
+func LastSyncedPath() string {
+	return appFile("last_synced")
 }
 
 // UIStatePath is where the TUI persists small preferences (last active
 // account tab, last unread-only filter) — see missionctl-core/uistate.
 func UIStatePath() string {
-	home, _ := os.UserHomeDir()
-	dir := filepath.Join(home, "Library", "Application Support", "mailctl")
-	_ = os.MkdirAll(dir, 0755)
-	return filepath.Join(dir, "ui_state.json")
+	return appFile("ui_state.json")
 }

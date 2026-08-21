@@ -1557,21 +1557,10 @@ func filterMsgs(msgs []models.Message, q string) []models.Message {
 
 func syncCmd() tea.Cmd {
 	return func() tea.Msg {
-		msgs, err := mail.FetchInbox(150, false)
+		msgs, accounts, err := mail.SyncFromApple(150)
 		if err != nil {
 			return syncDoneMsg{err: err}
 		}
-		s, err := store.New(config.DBPath(), config.Shared())
-		if err != nil {
-			return syncDoneMsg{err: err}
-		}
-		defer s.Close()
-		ctx := context.Background()
-		_ = s.DeleteBySource(ctx, "apple")
-		for i := range msgs {
-			_ = s.UpsertMessage(ctx, &msgs[i])
-		}
-		accounts, _ := s.ListAccounts(ctx)
 		return syncDoneMsg{count: len(msgs), accounts: accounts}
 	}
 }
