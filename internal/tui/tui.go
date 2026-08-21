@@ -4,10 +4,18 @@ import (
 	"context"
 	"fmt"
 	"hash/fnv"
+	"image/color"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
 
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/textarea"
+	"charm.land/bubbles/v2/textinput"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/aeon022/mailctl/internal/ai"
 	"github.com/aeon022/mailctl/internal/config"
 	"github.com/aeon022/mailctl/internal/mail"
@@ -21,12 +29,6 @@ import (
 	"github.com/aeon022/missionctl-core/palette"
 	"github.com/aeon022/missionctl-core/theme"
 	"github.com/aeon022/missionctl-core/uistate"
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/textarea"
-	"github.com/charmbracelet/bubbles/textinput"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	runewidth "github.com/mattn/go-runewidth"
 	"github.com/sahilm/fuzzy"
 )
@@ -51,24 +53,41 @@ const (
 
 // ── Styles ────────────────────────────────────────────────────────────────────
 
+// isDarkBG is resolved once at package load — lipgloss v2 dropped
+// AdaptiveColor (a static Light/Dark struct lipgloss itself resolved
+// internally) in favor of a LightDarkFunc meant to be re-resolved against a
+// live tea.BackgroundColorMsg on every render. This app builds all its
+// styles once, at package load, same as before v2 — adaptiveColor below is
+// the one-shot equivalent of what AdaptiveColor did implicitly. Same
+// pattern as notectl's v2 migration.
+var isDarkBG = lipgloss.HasDarkBackground(os.Stdin, os.Stdout)
+
+// adaptiveColor picks light or dark once, at package load — see isDarkBG.
+func adaptiveColor(light, dark string) color.Color {
+	if isDarkBG {
+		return lipgloss.Color(dark)
+	}
+	return lipgloss.Color(light)
+}
+
 var (
 	// palette — shared across the suite via missionctl-core/theme.
-	colorBlue   = theme.Blue
-	colorGreen  = theme.Green
-	colorRed    = theme.Red
-	colorMuted  = theme.Muted
-	colorSubtle = theme.Subtle
-	colorAmber  = theme.Amber
-	colorTabBg  = lipgloss.AdaptiveColor{Light: "252", Dark: "235"} // inactive tab bg
+	colorBlue   = theme.BlueV2
+	colorGreen  = theme.GreenV2
+	colorRed    = theme.RedV2
+	colorMuted  = theme.MutedV2
+	colorSubtle = theme.SubtleV2
+	colorAmber  = theme.AmberV2
+	colorTabBg  = adaptiveColor("252", "235") // inactive tab bg
 
 	// tab bar
 	styleTabActive = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(theme.OnAccent).
+			Foreground(theme.OnAccentV2).
 			Background(colorBlue).
 			Padding(0, 3)
 	styleTabInact = lipgloss.NewStyle().
-			Foreground(lipgloss.AdaptiveColor{Light: "237", Dark: "252"}).
+			Foreground(adaptiveColor("237", "252")).
 			Background(colorTabBg).
 			Padding(0, 3)
 
@@ -77,11 +96,11 @@ var (
 	styleUnread   = lipgloss.NewStyle().Bold(true)
 	styleRead     = lipgloss.NewStyle().Foreground(colorMuted)
 	styleSelected = lipgloss.NewStyle().
-			Background(theme.SelectedBg).
-			Foreground(theme.SelectedFg).
+			Background(theme.SelectedBgV2).
+			Foreground(theme.SelectedFgV2).
 			Bold(true)
 	styleAcctBadge = lipgloss.NewStyle().
-			Foreground(lipgloss.AdaptiveColor{Light: "25", Dark: "75"})
+			Foreground(adaptiveColor("25", "75"))
 
 	// detail / compose
 	styleHeader  = lipgloss.NewStyle().Bold(true).Foreground(colorBlue)
@@ -93,24 +112,24 @@ var (
 	styleHelp      = lipgloss.NewStyle().Foreground(colorMuted)
 	styleErr       = lipgloss.NewStyle().Foreground(colorRed)
 	styleOK        = lipgloss.NewStyle().Foreground(colorGreen)
-	styleSyncing   = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "214", Dark: "220"})
-	styleToday     = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "214", Dark: "220"}).Bold(true)
+	styleSyncing   = lipgloss.NewStyle().Foreground(adaptiveColor("214", "220"))
+	styleToday     = lipgloss.NewStyle().Foreground(adaptiveColor("214", "220")).Bold(true)
 	styleDateWeek  = lipgloss.NewStyle().Foreground(colorMuted)
-	styleDateMonth = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "247", Dark: "242"})
+	styleDateMonth = lipgloss.NewStyle().Foreground(adaptiveColor("247", "242"))
 	styleDateOld   = lipgloss.NewStyle().Foreground(colorSubtle)
 )
 
 // senderPalette: 8 distinct colors, avoid red/green (used for status).
 // Pad sender name BEFORE applying color so ANSI codes don't break width math.
-var senderPalette = []lipgloss.AdaptiveColor{
-	{Light: "25", Dark: "39"},   // blue
-	{Light: "91", Dark: "135"},  // purple
-	{Light: "30", Dark: "43"},   // teal
-	{Light: "130", Dark: "173"}, // orange
-	{Light: "23", Dark: "44"},   // dark cyan
-	{Light: "125", Dark: "168"}, // magenta
-	{Light: "58", Dark: "136"},  // gold
-	{Light: "17", Dark: "69"},   // navy
+var senderPalette = []color.Color{
+	adaptiveColor("25", "39"),   // blue
+	adaptiveColor("91", "135"),  // purple
+	adaptiveColor("30", "43"),   // teal
+	adaptiveColor("130", "173"), // orange
+	adaptiveColor("23", "44"),   // dark cyan
+	adaptiveColor("125", "168"), // magenta
+	adaptiveColor("58", "136"),  // gold
+	adaptiveColor("17", "69"),   // navy
 }
 
 func senderStyle(from string) lipgloss.Style {
@@ -306,14 +325,42 @@ func (m Model) saveUIState() {
 	})
 }
 
+// motionThrottleFilter drops MouseMotionMsg messages that arrive less than
+// 16ms after the last one that was let through, capping how often a
+// mouse-motion event alone can trigger a full render (~60/s) — everything
+// else (keys, clicks, resize, all the async load/sync messages) always
+// passes through untouched. Bubble Tea calls model.View() and writes a
+// render for every single message it receives regardless of whether Update
+// actually changed anything, and mouse-motion mode reports every pixel of
+// movement, not just cell-boundary crossings — on a fast trackpad that's
+// dozens of renders a second from hovering alone. Same fix, same reasoning,
+// as notectl's v2 migration (see its internal/tui/tui.go).
+func motionThrottleFilter() func(tea.Model, tea.Msg) tea.Msg {
+	var lastMotion time.Time
+	return func(_ tea.Model, msg tea.Msg) tea.Msg {
+		if _, ok := msg.(tea.MouseMotionMsg); !ok {
+			return msg
+		}
+		now := time.Now()
+		if now.Sub(lastMotion) < 16*time.Millisecond {
+			return nil
+		}
+		lastMotion = now
+		return msg
+	}
+}
+
 func Run() error {
 	m := New()
-	// WithFPS(30), not the 60 default: WithMouseAllMotion forces a full
+	// WithFPS(30), not the 60 default: mouse-all-motion mode forces a full
 	// render on every pixel of mouse motion, and 60fps of heavily-styled
 	// frames can outrun what the terminal can keep up with — this is what
 	// caused a severe duplicate-content rendering corruption bug in
-	// notectl, fixed the same way there.
-	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseAllMotion(), tea.WithFPS(30))
+	// notectl, fixed the same way there (WithFPS(30) + motionThrottleFilter
+	// + the v1→v2 migration itself). v1's tea.WithAltScreen()/
+	// WithMouseAllMotion() Program options are gone in v2 — AltScreen/
+	// MouseMode are now per-View fields, set in View() below instead.
+	p := tea.NewProgram(m, tea.WithFilter(motionThrottleFilter()), tea.WithFPS(30))
 	_, err := p.Run()
 	return err
 }
@@ -321,7 +368,7 @@ func Run() error {
 // ── Init ──────────────────────────────────────────────────────────────────────
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(loadMsgsCmd(m.unreadOnly, m.pendingAccountRestore), tea.WindowSize(), m.sp.Tick, loadLastSyncedCmd())
+	return tea.Batch(loadMsgsCmd(m.unreadOnly, m.pendingAccountRestore), tea.RequestWindowSize, m.sp.Tick, loadLastSyncedCmd())
 }
 
 type lastSyncedLoadedMsg struct{ t time.Time }
@@ -362,7 +409,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// detailRawWidth/detailBodyHeight) — this is what PgUp/PgDown
 		// scroll by via vp.Update(), so it has to agree with what's really
 		// on screen or scrolling overshoots what the viewport shows per page.
-		m.vp = viewport.New(m.detailRawWidth()-2, m.detailBodyHeight())
+		m.vp = viewport.New(viewport.WithWidth(m.detailRawWidth()-2), viewport.WithHeight(m.detailBodyHeight()))
 		m.bodyArea.SetWidth(msg.Width - 12)
 		m.bodyArea.SetHeight(m.height - 12)
 
@@ -465,56 +512,60 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case errMsg:
 		m.err = msg.err
 
-	case tea.MouseMsg:
+	case tea.MouseWheelMsg:
 		switch msg.Button {
-		case tea.MouseButtonWheelUp:
+		case tea.MouseWheelUp:
 			if m.view == viewDetail {
-				m.vp.LineUp(3)
+				m.vp.ScrollUp(3)
 			} else if m.cursor > 0 {
 				m.cursor--
 			}
-		case tea.MouseButtonWheelDown:
+		case tea.MouseWheelDown:
 			if m.view == viewDetail {
-				m.vp.LineDown(3)
+				m.vp.ScrollDown(3)
 			} else if m.cursor < len(m.msgs)-1 {
 				m.cursor++
 			}
-		case tea.MouseButtonLeft:
-			if msg.Action != tea.MouseActionPress || m.view != viewList {
-				return m, nil
+		}
+		return m, nil
+
+	case tea.MouseClickMsg:
+		if msg.Button != tea.MouseLeft || m.view != viewList {
+			return m, nil
+		}
+		if i := m.tabHitTest(msg.X, msg.Y); i >= 0 {
+			if i != m.activeTab {
+				m.activeTab = i
+				m.cursor = 0
+				return m, loadMsgsCmd(m.unreadOnly, m.activeAccount())
 			}
-			if i := m.tabHitTest(msg.X, msg.Y); i >= 0 {
-				if i != m.activeTab {
-					m.activeTab = i
-					m.cursor = 0
-					return m, loadMsgsCmd(m.unreadOnly, m.activeAccount())
-				}
-				return m, nil
-			}
-			if i := m.rowHitTest(msg.Y); i >= 0 {
-				now := time.Now()
-				if i == m.lastClickRow && now.Sub(m.lastClickAt) < doubleClickWindow {
-					m.cursor = i
-					m.lastClickRow = -1 // consumed, so a third click starts fresh
-					msgv := m.msgs[i]
-					m.detail = &msgv
-					if !msgv.Read {
-						m.msgs[i].Read = true
-						m.detail.Read = true
-					}
-					m.vp.SetContent("Loading body…")
-					m.vp.GotoTop()
-					m.view = viewDetail
-					return m, tea.Batch(loadBodyCmd(&msgv), markReadCmd(msgv.ID))
-				}
+			return m, nil
+		}
+		if i := m.rowHitTest(msg.Y); i >= 0 {
+			now := time.Now()
+			if i == m.lastClickRow && now.Sub(m.lastClickAt) < doubleClickWindow {
 				m.cursor = i
-				m.lastClickRow = i
-				m.lastClickAt = now
+				m.lastClickRow = -1 // consumed, so a third click starts fresh
+				msgv := m.msgs[i]
+				m.detail = &msgv
+				if !msgv.Read {
+					m.msgs[i].Read = true
+					m.detail.Read = true
+				}
+				m.vp.SetContent("Loading body…")
+				m.vp.GotoTop()
+				m.view = viewDetail
+				return m, tea.Batch(loadBodyCmd(&msgv), markReadCmd(msgv.ID))
 			}
-		case tea.MouseButtonNone:
-			if msg.Action == tea.MouseActionMotion && m.view == viewList {
-				m.hoverRow = m.rowHitTest(msg.Y)
-			}
+			m.cursor = i
+			m.lastClickRow = i
+			m.lastClickAt = now
+		}
+		return m, nil
+
+	case tea.MouseMotionMsg:
+		if m.view == viewList {
+			m.hoverRow = m.rowHitTest(msg.Y)
 		}
 		return m, nil
 
@@ -529,7 +580,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		m.err = nil
 		if time.Since(m.statusTime) > 3*time.Second {
 			m.status = ""
@@ -564,7 +615,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m Model) updateList(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.inPalette {
 		closePalette := func(mm Model) Model {
 			mm.inPalette = false
@@ -599,9 +650,9 @@ func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			chosen := matches[m.paletteCursor]
 			m = closePalette(m)
-			replay := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(chosen.Key)}
+			replay := tea.KeyPressMsg{Text: chosen.Key, Code: []rune(chosen.Key)[0]}
 			if chosen.Key == "enter" {
-				replay = tea.KeyMsg{Type: tea.KeyEnter}
+				replay = tea.KeyPressMsg{Code: tea.KeyEnter}
 			}
 			return m.updateList(replay)
 		}
@@ -852,7 +903,7 @@ func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m Model) updateDetail(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "q", "esc":
 		if m.confirmID != "" {
@@ -951,7 +1002,7 @@ func (m Model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m Model) updateCompose(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m Model) updateCompose(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.templatePicking {
 		switch msg.String() {
 		case "esc", "ctrl+t":
@@ -1022,7 +1073,18 @@ func (m Model) updateCompose(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // ── View ──────────────────────────────────────────────────────────────────────
 
-func (m Model) View() string {
+func (m Model) View() tea.View {
+	v := tea.NewView(m.viewContent())
+	// v1's tea.WithAltScreen()/WithMouseAllMotion() Program options are
+	// gone in v2 — AltScreen/MouseMode are now per-View fields, set on
+	// every render instead of once at Program startup. Same pattern as
+	// notectl's v2 migration.
+	v.AltScreen = true
+	v.MouseMode = tea.MouseModeAllMotion
+	return v
+}
+
+func (m Model) viewContent() string {
 	switch m.view {
 	case viewDetail:
 		return m.renderDetail()
@@ -1078,7 +1140,7 @@ func (m Model) openHelp() Model {
 		popW = 40
 	}
 
-	vp := viewport.New(popW-6, popH-5) // border 1+1, padding(1,2) → 2 rows/4 cols; -1 row for footer
+	vp := viewport.New(viewport.WithWidth(popW-6), viewport.WithHeight(popH-5)) // border 1+1, padding(1,2) → 2 rows/4 cols; -1 row for footer
 	vp.SetContent(m.helpContent())
 
 	m.helpVP = vp
@@ -1093,7 +1155,7 @@ func (m Model) openHelp() Model {
 // the whole screen — the list stays visible around it.
 func (m Model) renderHelpPopup() string {
 	footer := "esc / ?  close"
-	if m.helpVP.TotalLineCount() > m.helpVP.Height {
+	if m.helpVP.TotalLineCount() > m.helpVP.Height() {
 		footer = fmt.Sprintf("j/k scroll (%d%%)  ·  %s", int(m.helpVP.ScrollPercent()*100), footer)
 	}
 	body := m.helpVP.View() + "\n" + styleMeta.Render(footer)
@@ -1271,7 +1333,18 @@ const doubleClickWindow = 400 * time.Millisecond
 // the scrollbar's glyph column exactly where a wrapped line happened to be
 // too wide for the real display area.
 func (m Model) detailRawWidth() int {
-	return m.width - detailPadH*2 - 1
+	// Floor at a sane minimum, same defensive pattern as the WindowSizeMsg
+	// handler's height clamp — a degenerate/transient terminal width (0, or
+	// anything smaller than the padding+margin this subtracts) would
+	// otherwise go negative here and panic downstream on strings.Repeat
+	// with a negative count (renderDetail, formatDetail's wrap width, the
+	// scrollbar). Found via TestProgramSmoke_DetailScrollHeavy driving a
+	// real tea.Program through a startup race where the terminal's initial
+	// size query can report 0x0 before the real size arrives.
+	if w := m.width - detailPadH*2 - 1; w >= 10 {
+		return w
+	}
+	return 10
 }
 
 func (m Model) renderDetail() string {
@@ -1295,8 +1368,8 @@ func (m Model) renderDetail() string {
 	b.WriteString(styleDivider.Render(strings.Repeat("─", w)) + "\n")
 
 	// ── body viewport with scrollbar ──
-	m.vp.Width = w - 2 // leave 2 cols for scrollbar track
-	m.vp.Height = m.detailBodyHeight()
+	m.vp.SetWidth(w - 2) // leave 2 cols for scrollbar track
+	m.vp.SetHeight(m.detailBodyHeight())
 	b.WriteString(renderScrollbar(m.vp))
 
 	// ── footer ──
@@ -1320,7 +1393,7 @@ func (m Model) renderDetail() string {
 func renderScrollbar(vp viewport.Model) string {
 	content := vp.View()
 	lines := strings.Split(content, "\n")
-	h := vp.Height
+	h := vp.Height()
 	if h <= 0 {
 		h = len(lines)
 	}
@@ -1351,8 +1424,8 @@ func renderScrollbar(vp viewport.Model) string {
 		if i > 0 {
 			b.WriteByte('\n')
 		}
-		if lw := lipgloss.Width(l); lw < vp.Width {
-			l += strings.Repeat(" ", vp.Width-lw)
+		if lw := lipgloss.Width(l); lw < vp.Width() {
+			l += strings.Repeat(" ", vp.Width()-lw)
 		}
 		b.WriteString(l + " ")
 		if i >= thumbTop && i < thumbTop+thumbH {
@@ -1763,7 +1836,7 @@ func (m Model) buildListLinesWithMapping(w int) ([]string, int, []int) {
 		case i == m.cursor:
 			rowStyle = styleSelected
 		case i == m.hoverRow:
-			rowStyle = theme.Hover
+			rowStyle = theme.HoverV2
 		case !msg.Read:
 			rowStyle = styleUnread
 		default:
@@ -1786,7 +1859,7 @@ func (m Model) buildListLinesWithMapping(w int) ([]string, int, []int) {
 			case i == m.cursor:
 				preview = styleSelected.Width(w).Render(preview)
 			case i == m.hoverRow:
-				preview = theme.Hover.Width(w).Render(preview)
+				preview = theme.HoverV2.Width(w).Render(preview)
 			default:
 				preview = styleMeta.Render(preview)
 			}
@@ -2341,4 +2414,3 @@ func openURLCmd(url string) tea.Cmd {
 		return nil
 	}
 }
-

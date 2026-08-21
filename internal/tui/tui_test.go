@@ -6,13 +6,13 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/aeon022/mailctl/internal/models"
 	"github.com/aeon022/missionctl-core/palette"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	runewidth "github.com/mattn/go-runewidth"
-	"github.com/muesli/termenv"
 )
 
 func TestFormatDetail_WrapsOnRuneBoundaryNotByte(t *testing.T) {
@@ -35,7 +35,7 @@ func TestFormatDetail_WrapsOnRuneBoundaryNotByte(t *testing.T) {
 }
 
 func TestRenderScrollbarAlignsGlyphColumn(t *testing.T) {
-	vp := viewport.New(20, 5)
+	vp := viewport.New(viewport.WithWidth(20), viewport.WithHeight(5))
 	// Content with very different line lengths, and more lines than the
 	// viewport height so the scrollbar thumb/track actually renders.
 	vp.SetContent("a\nbb\nccccccccccccccccc\nd\nee\nfff\ng")
@@ -52,7 +52,11 @@ func TestRenderScrollbarAlignsGlyphColumn(t *testing.T) {
 		// thumb "┃", both single-width). Its rune column should be
 		// identical across every line regardless of that line's own text
 		// length — a mismatch means the glyph isn't forming a straight bar.
-		col := len([]rune(l)) - 1
+		// ansi.Strip, not a raw rune count: lipgloss v2 (unlike v1 under a
+		// non-tty test run) always emits real ANSI codes, and colors of
+		// different numeric width (e.g. "38;5;33" vs "38;5;244") change the
+		// raw string's rune length without changing anything visible.
+		col := len([]rune(ansi.Strip(l))) - 1
 		if glyphCol == -1 {
 			glyphCol = col
 			continue
@@ -73,12 +77,12 @@ func TestRenderScrollbarLineAtExactWidthStillHasGapBeforeGlyph(t *testing.T) {
 	// "...Unternehme┃" in a real long line that happened to hit the wrap
 	// width exactly). renderScrollbar now pads against vp.Width itself
 	// instead of the tallest line's incidental width.
-	vp := viewport.New(10, 3)
+	vp := viewport.New(viewport.WithWidth(10), viewport.WithHeight(3))
 	vp.SetContent(strings.Repeat("x", 10) + "\nshort\n" + strings.Repeat("y", 10) + "\nmore\nlines\nhere\nto force scrolling")
 
 	out := renderScrollbar(vp)
 	for i, l := range strings.Split(out, "\n") {
-		r := []rune(l)
+		r := []rune(ansi.Strip(l))
 		if len(r) < 2 {
 			continue
 		}
@@ -95,7 +99,7 @@ func TestRenderScrollbarAlignsGlyphColumn_VariationSelectorEmoji(t *testing.T) {
 	// out of alignment with the rest. formatDetail strips the selector via
 	// stripVariationSelectors before content ever reaches the viewport, so
 	// exercise that same normalization here.
-	vp := viewport.New(20, 4)
+	vp := viewport.New(viewport.WithWidth(20), viewport.WithHeight(4))
 	body := stripVariationSelectors("plain line one\n🏖️ Urlaub\nplain line three\nplain line four\nplain line five\nplain line six")
 	vp.SetContent(body)
 
@@ -104,7 +108,7 @@ func TestRenderScrollbarAlignsGlyphColumn_VariationSelectorEmoji(t *testing.T) {
 
 	glyphCol := -1
 	for i, l := range lines {
-		col := len([]rune(l)) - 1
+		col := len([]rune(ansi.Strip(l))) - 1
 		if glyphCol == -1 {
 			glyphCol = col
 			continue
@@ -130,14 +134,14 @@ func TestCommandPalette_TypeFilterAndExecute(t *testing.T) {
 	m := New()
 	m.width, m.height = 100, 30
 
-	mi, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(":")})
+	mi, _ := m.Update(tea.KeyPressMsg{Text: ":", Code: ':'})
 	m = mi.(Model)
 	if !m.inPalette {
 		t.Fatal("expected inPalette after ':'")
 	}
 
 	for _, r := range "un" {
-		mi, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		mi, _ = m.Update(tea.KeyPressMsg{Text: string(r), Code: r})
 		m = mi.(Model)
 	}
 	matches := palette.Match(paletteCommands, m.paletteInput.Value())
@@ -146,7 +150,7 @@ func TestCommandPalette_TypeFilterAndExecute(t *testing.T) {
 	}
 
 	before := m.unreadOnly
-	mi, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	mi, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = mi.(Model)
 	if m.inPalette {
 		t.Error("expected palette to close after executing a command")
@@ -159,10 +163,10 @@ func TestCommandPalette_TypeFilterAndExecute(t *testing.T) {
 func TestCommandPalette_EscCloses(t *testing.T) {
 	m := New()
 	m.width, m.height = 100, 30
-	mi, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(":")})
+	mi, _ := m.Update(tea.KeyPressMsg{Text: ":", Code: ':'})
 	m = mi.(Model)
 
-	mi, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	mi, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	m = mi.(Model)
 	if m.inPalette {
 		t.Error("expected esc to close the palette")
@@ -172,7 +176,7 @@ func TestCommandPalette_EscCloses(t *testing.T) {
 func TestHelpOverlay_OpenScrollClose(t *testing.T) {
 	m := Model{width: 100, height: 30}
 
-	mi, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")})
+	mi, _ := m.Update(tea.KeyPressMsg{Text: "?", Code: '?'})
 	m = mi.(Model)
 	if m.view != viewHelp {
 		t.Fatalf("expected viewHelp after '?', got %v", m.view)
@@ -183,14 +187,14 @@ func TestHelpOverlay_OpenScrollClose(t *testing.T) {
 
 	before := m.helpVP.ScrollPercent()
 	for i := 0; i < 5; i++ {
-		mi, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+		mi, _ = m.Update(tea.KeyPressMsg{Text: "j", Code: 'j'})
 		m = mi.(Model)
 	}
 	if m.helpVP.ScrollPercent() <= before {
 		t.Errorf("expected scroll to advance after pressing j, stayed at %v", before)
 	}
 
-	mi, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	mi, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	m = mi.(Model)
 	if m.view != viewList {
 		t.Errorf("expected esc to close help back to viewList, got %v", m.view)
@@ -256,9 +260,6 @@ func TestFormatListRow_StyleSurvivesPastTheDateAndFromColumns(t *testing.T) {
 	// profile: the subject text lost its bold/muted/selected styling
 	// entirely). formatListRow now applies rowStyle per-segment instead;
 	// verify rowStyle's own escape code reappears AFTER the from column.
-	lipgloss.SetColorProfile(termenv.ANSI256)
-	defer lipgloss.SetColorProfile(termenv.Ascii)
-
 	msg := models.Message{Subject: "hello", From: "Alice <a@example.com>", Date: time.Now(), Read: false}
 	row := formatListRow(&msg, 60, false, styleUnread, "")
 
@@ -276,9 +277,6 @@ func TestFormatListRow_SelectedBackgroundSpansFullWidth(t *testing.T) {
 	// Regression test for the same bug: a selected row's background must
 	// fill the entire row width, not just up to wherever the first inner
 	// reset clobbered it.
-	lipgloss.SetColorProfile(termenv.ANSI256)
-	defer lipgloss.SetColorProfile(termenv.Ascii)
-
 	msg := models.Message{Subject: "hi", From: "a@example.com", Date: time.Now(), Read: true}
 	row := formatListRow(&msg, 60, false, styleSelected, "")
 	if lipgloss.Width(row) != 60 {
@@ -294,7 +292,9 @@ func TestFormatListRow_SelectedBackgroundSpansFullWidth(t *testing.T) {
 	if lastOpen == -1 {
 		t.Fatal("expected to find the selected style's escape code in the row at all")
 	}
-	after := strings.TrimSuffix(row[lastOpen+len(openCode):], "\x1b[0m")
+	// lipgloss v2 emits "\x1b[m" (no "0") for a reset, not v1's "\x1b[0m".
+	after := strings.TrimSuffix(row[lastOpen+len(openCode):], "\x1b[m")
+	after = strings.TrimSuffix(after, "\x1b[0m")
 	if after == "" {
 		t.Error("expected trailing padding spaces after the last styled segment")
 	}
@@ -304,9 +304,6 @@ func TestFormatListRow_SelectedBackgroundSpansFullWidth(t *testing.T) {
 }
 
 func TestHighlightMatches_ColorsOnlyMatchedRunes(t *testing.T) {
-	lipgloss.SetColorProfile(termenv.ANSI256)
-	defer lipgloss.SetColorProfile(termenv.Ascii)
-
 	idxs := fuzzyMatchIndexes("bgt", "budgetctl")
 	if idxs == nil {
 		t.Fatal("expected 'bgt' to fuzzy-match 'budgetctl'")
