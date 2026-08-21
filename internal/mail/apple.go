@@ -261,21 +261,35 @@ end tell
 	return runAppleScript(script)
 }
 
-// SearchMessages searches all accounts for messages matching a query.
+// SearchMessages searches all accounts for messages whose subject matches
+// query. Mail.app's AppleScript dictionary has no generic "search" command
+// (the previous "search every mailbox for ..." here was a syntax error,
+// -2741, on every invocation) — this uses the same "whose" filter FetchThread
+// already relies on. It's scoped to subject only, not sender or body: a
+// live "whose sender contains" scan measured ~86s against this account's
+// mail, "subject or sender" together exceeded 2 minutes, and "content
+// contains" (body) didn't finish in over 2 minutes before being killed —
+// all live-measured, not estimated. Subject-only stays around 6-7s, fast
+// enough for an interactive CLI command. The default (non---live) search
+// path already covers sender and body via the local cached full-text
+// search; --live is the "check something not yet synced" escape hatch, so
+// this tradeoff only affects that path.
 func SearchMessages(query string, count int) ([]models.Message, error) {
 	script := fmt.Sprintf(`
 tell application "Mail"
 	set output to ""
-	set results to search every mailbox for "%s"
-	set found to {}
-	repeat with r in results
-		set found to found & (messages of r)
+	repeat with a in accounts
+		repeat with mbox in mailboxes of a
+			try
+				set msgs to (messages of mbox whose subject contains "%s")
+				set msgCount to count of msgs
+				if msgCount > %d then set msgCount to %d
+				repeat with i from 1 to msgCount
+					set m to item i of msgs
+%s				end repeat
+			end try
+		end repeat
 	end repeat
-	set msgCount to count of found
-	if msgCount > %d then set msgCount to %d
-	repeat with i from 1 to msgCount
-		set m to item i of found
-%s	end repeat
 	return output
 end tell
 `, escapeAS(query), count, count, appleMsgDump)
