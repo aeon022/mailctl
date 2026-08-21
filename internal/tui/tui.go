@@ -308,7 +308,12 @@ func (m Model) saveUIState() {
 
 func Run() error {
 	m := New()
-	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseAllMotion())
+	// WithFPS(30), not the 60 default: WithMouseAllMotion forces a full
+	// render on every pixel of mouse motion, and 60fps of heavily-styled
+	// frames can outrun what the terminal can keep up with — this is what
+	// caused a severe duplicate-content rendering corruption bug in
+	// notectl, fixed the same way there.
+	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseAllMotion(), tea.WithFPS(30))
 	_, err := p.Run()
 	return err
 }
@@ -342,7 +347,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
-		m.height = msg.Height
+		// -1, not msg.Height: render paths here fill their height budget
+		// exactly, and View() never ends in a trailing newline — that
+		// combination (output with exactly as many lines as the terminal,
+		// no trailing newline) is a long-standing bubbletea quirk
+		// (charmbracelet/bubbletea#304) where the renderer can fail to
+		// fully redraw the last line. One row of slack avoids ever hitting
+		// that boundary, regardless of terminal size.
+		m.height = msg.Height - 1
+		if m.height < 1 {
+			m.height = 1
+		}
 		// Match the width/height renderDetail actually displays with (see
 		// detailRawWidth/detailBodyHeight) — this is what PgUp/PgDown
 		// scroll by via vp.Update(), so it has to agree with what's really
@@ -1221,7 +1236,14 @@ func (m Model) renderList() string {
 	}
 	rightPad := w - lipgloss.Width(helpBar) - lipgloss.Width(countStr)
 	if rightPad < 0 {
-		rightPad = 0
+		// No room for both — drop countStr rather than clamp the pad to 0
+		// and append it anyway, which silently overflows w whenever the
+		// message count (changes with no resize or user action) gets wide.
+		countStr = ""
+		rightPad = w - lipgloss.Width(helpBar)
+		if rightPad < 0 {
+			rightPad = 0
+		}
 	}
 	b.WriteString(styleDivider.Render(strings.Repeat("─", w)) + "\n")
 	b.WriteString(helpBar + strings.Repeat(" ", rightPad) + countStr)
