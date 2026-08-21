@@ -115,6 +115,41 @@ func TestRenderScrollbarAlignsGlyphColumn_VariationSelectorEmoji(t *testing.T) {
 	}
 }
 
+func TestRenderScrollbarAlignsGlyphColumn_AmbiguousWidthRunes(t *testing.T) {
+	// Regression test for a real, live-reproduced bug: a real inbound email
+	// (a crypto price alert) was full of "€" and "↗" — both East-Asian-Width
+	// "Ambiguous" runes that lipgloss.Width/runewidth measure as narrow but
+	// this user's terminal renders one column wider. renderScrollbar padded
+	// each line against that narrow measurement, so a line with more of
+	// these runes than another ended up padded short relative to it on a
+	// terminal that renders them wide, throwing the scrollbar glyph out of
+	// column — looked like the border breaking up partway down the message
+	// body. A plain rune-count comparison can't catch this (padding with
+	// spaces keeps every line's rune count identical regardless of which
+	// width function chose the amount — Go can't observe how a real
+	// terminal renders a rune), so this checks the property that actually
+	// has to hold instead: every line's pessimistic width — the width it
+	// could render at on a terminal that renders ambiguous runes wide —
+	// must be identical, whether or not that line contains any.
+	vp := viewport.New(20, 4)
+	vp.SetContent("plain line one\n↗9.72%\n0,069 €\nplain line four\nplain line five\nplain line six")
+
+	out := renderScrollbar(vp)
+	lines := strings.Split(out, "\n")
+
+	wantW := -1
+	for i, l := range lines {
+		w := pessimisticWidth(l)
+		if wantW == -1 {
+			wantW = w
+			continue
+		}
+		if w != wantW {
+			t.Errorf("line %d (%q): pessimistic width %d, want %d (same as other lines) — scrollbar not vertically aligned on a terminal that renders €/↗ wide", i, l, w, wantW)
+		}
+	}
+}
+
 func TestStripVariationSelectorsAgreeOnWidth(t *testing.T) {
 	in := "🏖️ Urlaub"
 	got := stripVariationSelectors(in)

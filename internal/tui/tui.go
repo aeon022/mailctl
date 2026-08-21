@@ -1316,6 +1316,36 @@ func (m Model) renderDetail() string {
 	return lipgloss.NewStyle().Padding(detailPadV, detailPadH).Render(b.String())
 }
 
+// pessimisticWidth measures s like lipgloss.Width (ANSI-aware), but adds
+// one extra column per East-Asian "Ambiguous" rune it contains (€, ↗, em/en
+// dash, middle dot, …). runewidth and lipgloss.Width both measure these as
+// narrow, but real terminals commonly render them one column wider — a
+// real inbound email (crypto price alert, full of "↗6.08%" / "0,069 €")
+// confirmed this live: renderScrollbar padded each line against the
+// narrow measurement, so lines with more of these runes ended up padded
+// short, throwing the scrollbar's "│"/"┃" track out of column row to row —
+// looked like the border breaking up partway down. isBoxDrawing is
+// excluded: it's ALSO flagged ambiguous by go-runewidth, but unlike €/↗/—
+// it's near-universally single-width in practice, and this file draws its
+// own borders with it — counting those too would flag genuine dividers as
+// "too wide" and shave columns off them for no reason.
+func pessimisticWidth(s string) int {
+	w := lipgloss.Width(s)
+	for _, r := range s {
+		if runewidth.IsAmbiguousWidth(r) && !isBoxDrawing(r) {
+			w++
+		}
+	}
+	return w
+}
+
+// isBoxDrawing reports whether r is in the Unicode Box Drawing block
+// (─│┌└├┤ and friends, U+2500–U+257F) — see pessimisticWidth's doc comment
+// for why these are excluded from its ambiguous-width margin.
+func isBoxDrawing(r rune) bool {
+	return r >= 0x2500 && r <= 0x257F
+}
+
 // renderScrollbar renders viewport content with a sidebar scrollbar track.
 func renderScrollbar(vp viewport.Model) string {
 	content := vp.View()
@@ -1351,8 +1381,26 @@ func renderScrollbar(vp viewport.Model) string {
 		if i > 0 {
 			b.WriteByte('\n')
 		}
-		if lw := lipgloss.Width(l); lw < vp.Width {
+		// viewport.View() already right-pads every line to vp.Width itself
+		// (bubbles' own, narrower measurement) before we ever see it — so a
+		// line containing an ambiguous-width rune (€, ↗, em/en dash, …)
+		// arrives already "full" by that measurement, but pessimisticWidth
+		// (the width it could actually render at) exceeds vp.Width by
+		// however many such runes it has. There's no slack left to pad
+		// with in that case; trim that many trailing spaces back off
+		// instead — a viewport-padded line always has at least that many
+		// to spare, since that's exactly what it padded with.
+		switch lw := pessimisticWidth(l); {
+		case lw < vp.Width:
 			l += strings.Repeat(" ", vp.Width-lw)
+		case lw > vp.Width:
+			excess := lw - vp.Width
+			r := []rune(l)
+			trim := 0
+			for trim < excess && trim < len(r) && r[len(r)-1-trim] == ' ' {
+				trim++
+			}
+			l = string(r[:len(r)-trim])
 		}
 		b.WriteString(l + " ")
 		if i >= thumbTop && i < thumbTop+thumbH {
