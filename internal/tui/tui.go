@@ -1267,6 +1267,7 @@ func (m Model) renderList() string {
 		listH = 1
 	}
 
+	preListLines := strings.Count(b.String(), "\n")
 	if m.loading {
 		b.WriteString("\n  " + m.sp.View() + styleHelp.Render(" Loading messages…") + "\n")
 	} else if len(m.msgs) == 0 {
@@ -1281,6 +1282,12 @@ func (m Model) renderList() string {
 		for _, l := range lines[start:end] {
 			b.WriteString(l + "\n")
 		}
+	}
+	// Pin the status bar to the bottom of the screen instead of letting it
+	// glue itself right under a short list — pad the list block out to its
+	// full line budget, same pattern taskctl/notectl use.
+	for written := strings.Count(b.String(), "\n") - preListLines; written < listH; written++ {
+		b.WriteString("\n")
 	}
 
 	// ── status / help bar ──
