@@ -1,6 +1,9 @@
 package mail
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 const testMbox = `From MAILER-DAEMON Mon Jan  5 09:00:00 2026
 From: Jan <jan@example.com>
@@ -11,7 +14,8 @@ Message-Id: <msg1@example.com>
 X-Mozilla-Status: 0001
 
 Hi, this is the first message.
-It mentions a line that starts with >From in the body, already escaped.
+>From the escaping convention, this line starts with >From but isn't a real envelope.
+It should survive intact in the parsed body.
 
 From MAILER-DAEMON Tue Jan  6 10:00:00 2026
 From: Lisa <lisa@example.com>
@@ -51,6 +55,11 @@ func TestParseMboxMessage(t *testing.T) {
 	}
 	if m1.Date.Year() != 2026 || m1.Date.Month().String() != "January" {
 		t.Errorf("Date = %v", m1.Date)
+	}
+	// Verify ">From " escaping edge case: line starting with >From at column 0
+	// should survive intact in body, not be treated as an envelope delimiter
+	if !strings.Contains(m1.Body, ">From the escaping convention") {
+		t.Errorf("Body missing escaped >From line: %q", m1.Body)
 	}
 
 	m2, err := parseMboxMessage(parts[1], "jan@example.com", "INBOX", "thunderbird")
