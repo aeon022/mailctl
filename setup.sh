@@ -6,14 +6,28 @@ INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
 echo "Building mailctl..."
 go build -o "$INSTALL_DIR/mailctl" .
 
-echo "Checking Apple Mail access..."
-if ! osascript -e 'tell application "Mail" to return name of accounts' &>/dev/null 2>&1; then
+if [ "$(uname)" = "Darwin" ]; then
+    echo "Checking Apple Mail access..."
+    if ! osascript -e 'tell application "Mail" to return name of accounts' &>/dev/null 2>&1; then
+        echo ""
+        echo "Warning: Could not access Apple Mail."
+        echo "Make sure Apple Mail is open and has at least one account configured."
+        echo "You may need to grant Automation permissions:"
+        echo "  System Settings → Privacy & Security → Automation → Terminal → Mail ✓"
+        echo ""
+    fi
+else
+    echo "Checking for a Thunderbird profile..."
+    if [ ! -f "$HOME/.thunderbird/profiles.ini" ]; then
+        echo ""
+        echo "Warning: No Thunderbird profile found at ~/.thunderbird/profiles.ini."
+        echo "Install and run Thunderbird at least once, with one account configured,"
+        echo "before running mailctl sync."
+        echo ""
+    fi
     echo ""
-    echo "Warning: Could not access Apple Mail."
-    echo "Make sure Apple Mail is open and has at least one account configured."
-    echo "You may need to grant Automation permissions:"
-    echo "  System Settings → Privacy & Security → Automation → Terminal → Mail ✓"
-    echo ""
+    echo "To send mail, store your account's SMTP app password:"
+    echo "  mailctl account set-password you@example.com"
 fi
 
 echo ""

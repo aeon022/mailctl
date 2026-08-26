@@ -1,6 +1,6 @@
 # mailctl
 
-Terminal email client for Apple Mail. Part of the [missionctl](https://github.com/aeon022/missionctl) suite.
+Terminal email client for Apple Mail (macOS) or Thunderbird (Linux). Part of the [missionctl](https://github.com/aeon022/missionctl) suite.
 
 Syncs your Apple Mail inbox into a local SQLite cache, provides a fast full-screen TUI, and exposes an MCP server so AI agents (Claude Desktop, etc.) can read and send email on your behalf.
 
@@ -30,6 +30,28 @@ Syncs your Apple Mail inbox into a local SQLite cache, provides a fast full-scre
    ```
 
 5. **Optional — connect to Claude Desktop** (see [MCP — AI Integration](#mcp--ai-integration)).
+
+---
+
+## Linux (Thunderbird)
+
+On Linux, mailctl reads mail directly from your default Thunderbird
+profile's local mbox files, and sends via that account's own SMTP server.
+
+1. Install and run Thunderbird at least once, with at least one IMAP
+   account configured.
+2. Store the account's SMTP app password (used for sending; not needed
+   just to read/sync):
+   ```bash
+   mailctl account set-password you@example.com
+   ```
+3. `mailctl sync`, `mailctl`, etc. work the same as on macOS.
+
+Current limitations: mbox mailbox format only (not Maildir), inbox only
+(no other folders), STARTTLS + password auth only (no implicit TLS on
+port 465, no OAuth2), no attachments on send, and no draft-saving or
+delete/mark-unread from mailctl — those would require writing into a
+Thunderbird mbox file it may have open, which mailctl avoids.
 
 ---
 
