@@ -53,7 +53,7 @@ func toolThread() mcp.Tool {
 
 func toolSend() mcp.Tool {
 	return mcp.NewTool("send_email",
-		mcp.WithDescription("Send an email via Apple Mail. Provide the full email content — the user will be asked to confirm before sending."),
+		mcp.WithDescription("Send an email from the user's mail account. Provide the full email content — the user will be asked to confirm before sending."),
 		mcp.WithString("to", mcp.Required(), mcp.Description("Recipient email address (or comma-separated list)")),
 		mcp.WithString("subject", mcp.Required(), mcp.Description("Email subject")),
 		mcp.WithString("body", mcp.Required(), mcp.Description("Email body (plain text)")),
@@ -64,7 +64,7 @@ func toolSend() mcp.Tool {
 
 func toolDraft() mcp.Tool {
 	return mcp.NewTool("draft_email",
-		mcp.WithDescription("Save an email to Apple Mail Drafts for review before sending. Use this when the user wants to review before sending."),
+		mcp.WithDescription("Save an email to the mail client's Drafts folder for review before sending. Use this when the user wants to review before sending."),
 		mcp.WithString("to", mcp.Required(), mcp.Description("Recipient email address")),
 		mcp.WithString("subject", mcp.Required(), mcp.Description("Email subject")),
 		mcp.WithString("body", mcp.Required(), mcp.Description("Email body")),
@@ -75,7 +75,7 @@ func toolDraft() mcp.Tool {
 
 func toolSync() mcp.Tool {
 	return mcp.NewTool("sync_inbox",
-		mcp.WithDescription("Sync the inbox from Apple Mail into the local cache. Call this if the inbox data seems stale."),
+		mcp.WithDescription("Sync the inbox from the user's mail client into the local cache. Call this if the inbox data seems stale."),
 		mcp.WithNumber("count", mcp.Description("Messages to sync per account (default 50)")),
 	)
 }

@@ -23,7 +23,7 @@ var inboxCmd = &cobra.Command{
 		ctx := context.Background()
 
 		if inboxLive {
-			// fetch directly from Apple Mail
+			// fetch directly from the platform mail client
 			msgs, err := mail.FetchInbox(inboxCount, inboxUnread)
 			if err != nil {
 				return err
@@ -56,6 +56,6 @@ var inboxCmd = &cobra.Command{
 func init() {
 	inboxCmd.Flags().BoolVar(&inboxUnread, "unread", false, "Only show unread messages")
 	inboxCmd.Flags().IntVar(&inboxCount, "count", 20, "Number of messages to show")
-	inboxCmd.Flags().BoolVar(&inboxLive, "live", false, "Fetch directly from Apple Mail (slower)")
+	inboxCmd.Flags().BoolVar(&inboxLive, "live", false, "Fetch directly from your mail client (slower)")
 	rootCmd.AddCommand(inboxCmd)
 }

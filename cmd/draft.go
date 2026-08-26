@@ -10,7 +10,7 @@ import (
 
 var draftCmd = &cobra.Command{
 	Use:     "draft <draft.md>",
-	Short:   "Save an email to Apple Mail Drafts folder",
+	Short:   "Save an email to your mail client's Drafts folder",
 	Example: `  mailctl draft email.md`,
 	Args:    cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {

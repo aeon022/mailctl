@@ -12,7 +12,7 @@ var jsonFlag bool
 
 var rootCmd = &cobra.Command{
 	Use:   "mailctl",
-	Short: "Email from the terminal — send, draft, read via Apple Mail",
+	Short: "Email from the terminal — send, draft, read",
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		return config.Load()
 	},

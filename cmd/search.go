@@ -53,6 +53,6 @@ var searchCmd = &cobra.Command{
 
 func init() {
 	searchCmd.Flags().IntVar(&searchCount, "count", 20, "Max results")
-	searchCmd.Flags().BoolVar(&searchLive, "live", false, "Search Apple Mail directly by subject (not sender/body — see SearchMessages)")
+	searchCmd.Flags().BoolVar(&searchLive, "live", false, "Search your mail client directly by subject (not sender/body — see SearchMessages)")
 	rootCmd.AddCommand(searchCmd)
 }

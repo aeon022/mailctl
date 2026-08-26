@@ -33,8 +33,8 @@ var threadCmd = &cobra.Command{
 			}
 		}
 
-		// fall back to live Apple Mail search
-		fmt.Printf("Not in cache — searching Apple Mail for %q...\n", subject)
+		// fall back to a live search in the platform mail client
+		fmt.Printf("Not in cache — searching your mail client for %q...\n", subject)
 		msgs, err := mail.FetchThread(subject, threadCount)
 		if err != nil {
 			return err

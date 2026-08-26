@@ -250,7 +250,7 @@ type Model struct {
 var paletteCommands = []palette.Command{
 	{Name: "new", Desc: "New message", Key: "n"},
 	{Name: "open", Desc: "Open message", Key: "enter"},
-	{Name: "openapp", Desc: "Open in Mail.app", Key: "o"},
+	{Name: "openapp", Desc: "Open in mail client", Key: "o"},
 	{Name: "delete", Desc: "Delete (press again to confirm)", Key: "d"},
 	{Name: "copy", Desc: "Copy subject + sender to clipboard", Key: "y"},
 	{Name: "select", Desc: "Select mode (batch actions)", Key: "v"},
@@ -1114,7 +1114,7 @@ func (m Model) helpContent() string {
 		Section("Messages").
 		Row("enter", "open message").
 		Row("n", "new message").
-		Row("o", "open in Mail.app").
+		Row("o", "open in mail client").
 		Row("d", "delete (asks to confirm)").
 		Row("y", "copy subject + sender to clipboard").
 		Section("Other").

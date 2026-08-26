@@ -9,7 +9,7 @@ import (
 
 var accountsCmd = &cobra.Command{
 	Use:   "accounts",
-	Short: "List all Apple Mail accounts",
+	Short: "List all mail accounts",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		accounts, err := mail.ListAccounts()
 		if err != nil {

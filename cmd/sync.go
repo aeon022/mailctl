@@ -14,7 +14,7 @@ var syncCount int
 
 var syncCmd = &cobra.Command{
 	Use:   "sync",
-	Short: "Sync inbox from Apple Mail into local cache",
+	Short: "Sync inbox from your mail client into local cache",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		msgs, _, err := mail.Sync(syncCount)
 		if err != nil {
