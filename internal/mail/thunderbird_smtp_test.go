@@ -29,4 +29,27 @@ func TestBuildMIMEMessage(t *testing.T) {
 	if !strings.Contains(msg, "\r\n\r\nHi there") {
 		t.Errorf("expected a blank line before the body, got:\n%s", msg)
 	}
+	if strings.Contains(msg, "Bcc:") {
+		t.Errorf("Bcc must not appear in the headers, got:\n%s", msg)
+	}
+}
+
+// The SMTP envelope decides delivery, not the Cc:/Bcc: headers — CC'd and
+// BCC'd people got nothing before this was in the RCPT TO list.
+func TestEnvelopeRecipients(t *testing.T) {
+	d := &models.Draft{
+		To:  []string{"jan@example.com", " "},
+		CC:  []string{"lisa@example.com", "jan@example.com"},
+		BCC: []string{" bob@example.com "},
+	}
+	got := envelopeRecipients(d)
+	want := []string{"jan@example.com", "lisa@example.com", "bob@example.com"}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("got %v, want %v", got, want)
+		}
+	}
 }

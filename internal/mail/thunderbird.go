@@ -155,12 +155,20 @@ func Send(d *models.Draft) error {
 	if err != nil {
 		return err
 	}
+	if acc.SMTPHost == "" {
+		return fmt.Errorf("no SMTP server configured for %s in Thunderbird", acc.Email)
+	}
 	password, err := keyring.GetPassword(acc.Email)
 	if err != nil {
 		return fmt.Errorf("no password stored for %s — run: mailctl account set-password %s", acc.Email, acc.Email)
 	}
 	msg := buildMIMEMessage(d, acc.Email)
-	return sendViaSMTP(acc.SMTPHost, acc.SMTPPort, acc.Username, password, acc.Email, d.To, msg)
+	// Two things that aren't obvious from the call: the envelope recipient
+	// list — not the Cc:/Bcc: headers — is what actually decides who
+	// receives the mail, so CC and BCC have to be in it; and the SMTP login
+	// is SMTPUsername, which Thunderbird stores separately from the IMAP
+	// one (buildTBAccounts falls back to the IMAP one when it's absent).
+	return sendViaSMTP(acc.SMTPHost, acc.SMTPPort, acc.SMTPUsername, password, acc.Email, envelopeRecipients(d), msg)
 }
 
 // SaveDraft is not supported on Linux — see the plan's Global Constraints:

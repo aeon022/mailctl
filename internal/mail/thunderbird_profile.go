@@ -21,6 +21,9 @@ type tbAccount struct {
 	Directory string
 	SMTPHost  string
 	SMTPPort  int
+	// SMTPUsername is Thunderbird's separate SMTP login — often the same
+	// as the IMAP Username, but not always (and not always present).
+	SMTPUsername string
 }
 
 type iniSection struct {
@@ -35,6 +38,7 @@ func parseINI(data []byte) []iniSection {
 	var sections []iniSection
 	var current *iniSection
 	sc := bufio.NewScanner(bytes.NewReader(data))
+	sc.Buffer(make([]byte, 0, 64*1024), len(data)+1)
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
 		if line == "" || strings.HasPrefix(line, ";") || strings.HasPrefix(line, "#") {
@@ -90,9 +94,17 @@ func resolveDefaultProfileDir(sections []iniSection, thunderbirdDir string) (str
 // parsePrefsJS reads every `user_pref("key", value);` line into a flat
 // map. Thunderbird's prefs.js has no nesting — every setting is one such
 // line — so a flat string map is all the structure this needs.
+//
+// The Buffer call (here and in parseINI) lifts bufio.Scanner's 64KB
+// default line cap to the whole input: prefs.js can carry a single
+// enormous line (an HTML signature with an inline base64 image), and past
+// the cap Scan() just stops — silently dropping every later pref, which
+// surfaces as "no IMAP accounts found" rather than as an error. The input
+// is already fully in memory, so the larger buffer costs nothing.
 func parsePrefsJS(data []byte) map[string]string {
 	prefs := map[string]string{}
 	sc := bufio.NewScanner(bytes.NewReader(data))
+	sc.Buffer(make([]byte, 0, 64*1024), len(data)+1)
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
 		const prefix = `user_pref("`
@@ -148,13 +160,24 @@ func buildTBAccounts(prefs map[string]string) []tbAccount {
 		if len(identIDs) > 0 && strings.TrimSpace(identIDs[0]) != "" {
 			identID := strings.TrimSpace(identIDs[0])
 			a.Email = prefs["mail.identity."+identID+".useremail"]
-			if smtpID := prefs["mail.identity."+identID+".smtpServer"]; smtpID != "" {
+			// Thunderbird omits the per-identity smtpServer pref for
+			// identities that use the default server — the common
+			// single-account case — so fall back to it.
+			smtpID := prefs["mail.identity."+identID+".smtpServer"]
+			if smtpID == "" {
+				smtpID = prefs["mail.smtp.defaultserver"]
+			}
+			if smtpID != "" {
 				a.SMTPHost = prefs["mail.smtpserver."+smtpID+".hostname"]
 				a.SMTPPort, _ = strconv.Atoi(prefs["mail.smtpserver."+smtpID+".port"])
+				a.SMTPUsername = prefs["mail.smtpserver."+smtpID+".username"]
 			}
 		}
 		if a.Email == "" {
 			a.Email = a.Username
+		}
+		if a.SMTPUsername == "" {
+			a.SMTPUsername = a.Username
 		}
 		accounts = append(accounts, a)
 	}

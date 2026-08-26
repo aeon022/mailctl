@@ -75,8 +75,26 @@ user_pref("mail.server.server1.userName", "jan@example.com");
 user_pref("mail.server.server1.directory", "/home/jan/.thunderbird/abc123.default-release/ImapMail/imap.example.com");
 user_pref("mail.smtpserver.smtp1.hostname", "smtp.example.com");
 user_pref("mail.smtpserver.smtp1.port", 587);
+user_pref("mail.smtpserver.smtp1.username", "jan.smtp");
 user_pref("mail.server.server2.type", "rss");
 user_pref("mail.server.server2.hostname", "");
+`
+
+// The single-account shape: Thunderbird writes no per-identity smtpServer
+// pref when the identity uses the default server, and no SMTP username
+// pref when it matches the IMAP one.
+const testPrefsJSDefaultSMTP = `user_pref("mail.accountmanager.accounts", "account1");
+user_pref("mail.account.account1.identities", "id1");
+user_pref("mail.account.account1.server", "server1");
+user_pref("mail.identity.id1.useremail", "lisa@example.com");
+user_pref("mail.server.server1.type", "imap");
+user_pref("mail.server.server1.hostname", "imap.example.com");
+user_pref("mail.server.server1.port", 993);
+user_pref("mail.server.server1.userName", "lisa@example.com");
+user_pref("mail.server.server1.directory", "/home/lisa/.thunderbird/p/ImapMail/imap.example.com");
+user_pref("mail.smtp.defaultserver", "smtp1");
+user_pref("mail.smtpserver.smtp1.hostname", "smtp.example.com");
+user_pref("mail.smtpserver.smtp1.port", 587);
 `
 
 func TestParsePrefsJS(t *testing.T) {
@@ -107,5 +125,22 @@ func TestBuildTBAccounts_SkipsNonIMAPAndFillsSMTP(t *testing.T) {
 	}
 	if a.Directory != "/home/jan/.thunderbird/abc123.default-release/ImapMail/imap.example.com" {
 		t.Errorf("Directory = %q", a.Directory)
+	}
+	if a.SMTPUsername != "jan.smtp" {
+		t.Errorf("SMTPUsername = %q, want the smtpserver username, not the IMAP one", a.SMTPUsername)
+	}
+}
+
+func TestBuildTBAccounts_FallsBackToDefaultSMTPServer(t *testing.T) {
+	accounts := buildTBAccounts(parsePrefsJS([]byte(testPrefsJSDefaultSMTP)))
+	if len(accounts) != 1 {
+		t.Fatalf("got %d accounts, want 1", len(accounts))
+	}
+	a := accounts[0]
+	if a.SMTPHost != "smtp.example.com" || a.SMTPPort != 587 {
+		t.Errorf("SMTPHost/SMTPPort = %q/%d, want the mail.smtp.defaultserver values", a.SMTPHost, a.SMTPPort)
+	}
+	if a.SMTPUsername != "lisa@example.com" {
+		t.Errorf("SMTPUsername = %q, want fallback to the IMAP username", a.SMTPUsername)
 	}
 }
