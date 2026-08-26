@@ -1564,7 +1564,7 @@ func filterMsgs(msgs []models.Message, q string) []models.Message {
 
 func syncCmd() tea.Cmd {
 	return func() tea.Msg {
-		msgs, accounts, err := mail.SyncFromApple(150)
+		msgs, accounts, err := mail.Sync(150)
 		if err != nil {
 			return syncDoneMsg{err: err}
 		}

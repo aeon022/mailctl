@@ -1,3 +1,5 @@
+//go:build darwin
+
 package mail
 
 import (
@@ -9,6 +11,8 @@ import (
 	"github.com/aeon022/mailctl/internal/models"
 	"github.com/google/uuid"
 )
+
+const sourceName = "apple"
 
 // Send sends an email via Apple Mail.
 func Send(d *models.Draft) error {
@@ -441,7 +445,7 @@ func parseMessages(raw, defaultMailbox string) []models.Message {
 		m := models.Message{
 			ID:      uuid.New().String(),
 			Mailbox: defaultMailbox,
-			Source:  "apple",
+			Source:  sourceName,
 		}
 		// body may contain colons, so collect body lines separately
 		var bodyLines []string

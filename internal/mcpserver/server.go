@@ -165,7 +165,7 @@ func handleDraft(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResul
 
 func handleSync(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	count := int(req.GetFloat("count", 50))
-	msgs, _, err := mail.SyncFromApple(count)
+	msgs, _, err := mail.Sync(count)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
