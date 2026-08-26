@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 
 	coreconfig "github.com/aeon022/missionctl-core/config"
 	"github.com/aeon022/missionctl-core/licensing"
@@ -60,6 +61,25 @@ func SetLicense(key, status, benefitID string) error {
 
 var Active Config
 
+// appSupportDirFor returns the OS-appropriate application-support directory
+// for the given goos/home — a pure function (goos as a parameter, not
+// runtime.GOOS directly) so both branches are unit-testable from a single
+// compiled test binary, regardless of which OS actually runs the test.
+func appSupportDirFor(goos, home string) string {
+	if goos == "linux" {
+		if xdg := os.Getenv("XDG_DATA_HOME"); xdg != "" {
+			return filepath.Join(xdg, "mailctl")
+		}
+		return filepath.Join(home, ".local", "share", "mailctl")
+	}
+	return filepath.Join(home, "Library", "Application Support", "mailctl")
+}
+
+func appSupportDir() string {
+	home, _ := os.UserHomeDir()
+	return appSupportDirFor(runtime.GOOS, home)
+}
+
 func Load() error {
 	home, _ := os.UserHomeDir()
 	cfgDir := filepath.Join(home, ".config", "mailctl")
@@ -98,8 +118,7 @@ func DBPath() string {
 		resolved, _ := coreconfig.ResolveDir("mailctl", dir)
 		return filepath.Join(resolved, "mailctl.db")
 	}
-	home, _ := os.UserHomeDir()
-	dir := filepath.Join(home, "Library", "Application Support", "mailctl")
+	dir := appSupportDir()
 	_ = os.MkdirAll(dir, 0755)
 	return filepath.Join(dir, "mailctl.db")
 }
@@ -113,8 +132,7 @@ func Shared() bool {
 // appFile returns the path to name inside mailctl's private app-support
 // directory, creating that directory if needed.
 func appFile(name string) string {
-	home, _ := os.UserHomeDir()
-	dir := filepath.Join(home, "Library", "Application Support", "mailctl")
+	dir := appSupportDir()
 	_ = os.MkdirAll(dir, 0755)
 	return filepath.Join(dir, name)
 }
