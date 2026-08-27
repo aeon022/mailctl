@@ -4,6 +4,13 @@ Terminal email client for Apple Mail (macOS) or Thunderbird (Linux). Part of the
 
 Syncs your Apple Mail inbox into a local SQLite cache, provides a fast full-screen TUI, and exposes an MCP server so AI agents (Claude Desktop, etc.) can read and send email on your behalf.
 
+**What's new:** Linux support via Thunderbird — reads your default Thunderbird
+profile's mbox files and sends via the account's own SMTP server. New
+`mailctl account set-password` command for storing SMTP credentials in the
+OS keyring, and a Linux-aware `mailctl doctor` check. See
+[Linux (Thunderbird)](#linux-thunderbird) below for setup and current
+limitations — this is fresh and actively being tested, feedback welcome.
+
 ---
 
 ## Quick Start
@@ -34,6 +41,12 @@ Syncs your Apple Mail inbox into a local SQLite cache, provides a fast full-scre
 ---
 
 ## Linux (Thunderbird)
+
+**Status: newly added, currently being tested on real hardware.** The
+implementation builds and passes its unit tests, but hasn't yet been run
+against a real Thunderbird install end-to-end. Feedback, bug reports, and
+edge cases (unusual account setups, non-standard prefs.js layouts, etc.)
+are very welcome — please open an issue.
 
 On Linux, mailctl reads mail directly from your default Thunderbird
 profile's local mbox files, and sends via that account's own SMTP server.
