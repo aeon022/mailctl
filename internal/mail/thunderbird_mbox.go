@@ -1,6 +1,7 @@
 package mail
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/base64"
 	"errors"
@@ -194,24 +195,100 @@ func parseMboxMessage(raw []byte, account, mailboxName, source string) (models.M
 	}, nil
 }
 
-// parseMboxFile reads and parses an entire mbox file. A single malformed
-// entry is skipped rather than aborting the whole file — Thunderbird may
-// be mid-write to the last entry when this runs.
-func parseMboxFile(path, account, mailboxName, source string) ([]models.Message, error) {
-	data, err := os.ReadFile(path)
+// streamMboxMessages parses path's messages one at a time without ever
+// holding the whole file — or every parsed message — in memory at once
+// (mailctl#1: a full os.ReadFile + splitMbox + "parse everything, truncate
+// later" pipeline OOM'd on multi-GB real-world Thunderbird inboxes). visit
+// is called for each valid, non-expunged message in file order; returning
+// false stops reading the rest of the file. A single malformed or expunged
+// entry is skipped rather than aborting the whole file — Thunderbird may be
+// mid-write to the last entry when this runs.
+func streamMboxMessages(path, account, mailboxName, source string, visit func(models.Message) bool) error {
+	f, err := os.Open(path)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	var msgs []models.Message
-	for _, raw := range splitMbox(data) {
+	defer f.Close()
+
+	r := bufio.NewReaderSize(f, 64*1024)
+	var current []byte
+	inMsg := false
+	stop := false
+
+	flush := func() {
+		if !inMsg || stop {
+			return
+		}
+		raw := current
+		current = nil
+		inMsg = false
 		m, err := parseMboxMessage(raw, account, mailboxName, source)
-		if err != nil {
-			continue
+		if err != nil || (m.Subject == "" && m.From == "") {
+			return
 		}
-		if m.Subject == "" && m.From == "" {
-			continue
+		if !visit(m) {
+			stop = true
 		}
-		msgs = append(msgs, m)
 	}
-	return msgs, nil
+
+	for !stop {
+		line, err := r.ReadBytes('\n')
+		if len(line) > 0 {
+			if bytes.HasPrefix(line, []byte("From ")) {
+				flush()
+				inMsg = true
+			} else if inMsg {
+				current = append(current, line...)
+			}
+		}
+		if err != nil {
+			break
+		}
+	}
+	flush()
+	return nil
+}
+
+// parseMboxFile reads and parses an entire mbox file into memory. Only use
+// this where the caller genuinely needs every message; anything driven by
+// a result count or an early-exit condition should call streamMboxMessages
+// or mboxWindow instead, or it reintroduces the OOM this was written to fix.
+func parseMboxFile(path, account, mailboxName, source string) ([]models.Message, error) {
+	var msgs []models.Message
+	err := streamMboxMessages(path, account, mailboxName, source, func(m models.Message) bool {
+		msgs = append(msgs, m)
+		return true
+	})
+	return msgs, err
+}
+
+// appendBounded appends m to buf, keeping only the newest limit entries —
+// the small trailing-window a "give me the last N" caller actually needs,
+// instead of retaining everything and truncating at the end. limit<=0
+// means "keep none" (matches a caller who asked for zero results).
+func appendBounded(buf []models.Message, m models.Message, limit int) []models.Message {
+	if limit <= 0 {
+		return buf
+	}
+	buf = append(buf, m)
+	if len(buf) > limit {
+		buf = buf[1:]
+	}
+	return buf
+}
+
+// mboxWindow streams path and returns at most limit messages: the newest
+// ones (last in file order) that satisfy keep (keep == nil accepts all).
+// This is the bounded building block FetchInbox/SearchMessages use so a
+// huge mbox never gets fully materialized just to answer "give me the
+// most recent N".
+func mboxWindow(path, account, mailboxName, source string, limit int, keep func(models.Message) bool) ([]models.Message, error) {
+	var window []models.Message
+	err := streamMboxMessages(path, account, mailboxName, source, func(m models.Message) bool {
+		if keep == nil || keep(m) {
+			window = appendBounded(window, m, limit)
+		}
+		return true
+	})
+	return window, err
 }

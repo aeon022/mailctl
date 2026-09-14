@@ -26,6 +26,12 @@ func inboxPath(acc tbAccount) string {
 // body is included here directly: parsing an mbox file is a cheap local
 // read, not a round trip through AppleScript, so there's no reason to
 // defer it to FetchMessageBody the way the Apple backend does.
+// count is a hard cap on what's retained per account while streaming (see
+// mboxWindow) — mailctl#1: parsing a whole multi-GB inbox before truncating
+// to count OOM'd. That bounds each account to its newest count messages by
+// file order rather than every message ever received; a single account can
+// never contribute more than count to the final top-count-by-date result
+// below, so this is safe for the merge, not just an approximation of it.
 func FetchInbox(count int, unreadOnly bool) ([]models.Message, error) {
 	accounts, err := thunderbirdAccounts()
 	if err != nil {
@@ -33,22 +39,15 @@ func FetchInbox(count int, unreadOnly bool) ([]models.Message, error) {
 	}
 	var all []models.Message
 	for _, acc := range accounts {
-		msgs, err := parseMboxFile(inboxPath(acc), acc.Email, "INBOX", sourceName)
+		window, err := mboxWindow(inboxPath(acc), acc.Email, "INBOX", sourceName, count, func(m models.Message) bool {
+			return !unreadOnly || !m.Read
+		})
 		if err != nil {
 			continue // no INBOX file yet for this account — skip, not fatal
 		}
-		all = append(all, msgs...)
+		all = append(all, window...)
 	}
 	sort.Slice(all, func(i, j int) bool { return all[i].Date.After(all[j].Date) })
-	if unreadOnly {
-		var unread []models.Message
-		for _, m := range all {
-			if !m.Read {
-				unread = append(unread, m)
-			}
-		}
-		all = unread
-	}
 	if len(all) > count {
 		all = all[:count]
 	}
@@ -67,14 +66,17 @@ func FetchMessageBody(account, subject, from string) (string, error) {
 		if account != "" && acc.Email != account {
 			continue
 		}
-		msgs, err := parseMboxFile(inboxPath(acc), acc.Email, "INBOX", sourceName)
-		if err != nil {
-			continue
-		}
-		for _, m := range msgs {
+		var body string
+		found := false
+		streamMboxMessages(inboxPath(acc), acc.Email, "INBOX", sourceName, func(m models.Message) bool {
 			if m.Subject == subject && strings.Contains(m.From, from) {
-				return m.Body, nil
+				body, found = m.Body, true
+				return false // stop — no need to parse the rest of this mailbox
 			}
+			return true
+		})
+		if found {
+			return body, nil
 		}
 	}
 	return "", fmt.Errorf("message not found: subject=%q from=%q", subject, from)
@@ -90,18 +92,15 @@ func SearchMessages(query string, count int) ([]models.Message, error) {
 	var out []models.Message
 	q := strings.ToLower(query)
 	for _, acc := range accounts {
-		msgs, err := parseMboxFile(inboxPath(acc), acc.Email, "INBOX", sourceName)
-		if err != nil {
-			continue
+		if len(out) >= count {
+			break
 		}
-		for _, m := range msgs {
+		streamMboxMessages(inboxPath(acc), acc.Email, "INBOX", sourceName, func(m models.Message) bool {
 			if strings.Contains(strings.ToLower(m.Subject), q) {
 				out = append(out, m)
 			}
-		}
-	}
-	if len(out) > count {
-		out = out[:count]
+			return len(out) < count // stop this mailbox once we have enough
+		})
 	}
 	return out, nil
 }

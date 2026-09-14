@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/aeon022/mailctl/internal/models"
 )
 
 // testMbox mirrors what Thunderbird actually writes: RFC 2047 encoded-word
@@ -234,6 +236,74 @@ func TestParseMboxFile_DropsExpungedMessages(t *testing.T) {
 	for _, m := range msgs {
 		if strings.HasPrefix(m.Subject, "Deleted") {
 			t.Errorf("expunged message resurrected: %q", m.Subject)
+		}
+	}
+}
+
+// streamMboxMessages must stop reading the file as soon as visit returns
+// false — this is what bounds memory for a huge mbox instead of parsing
+// every message before the caller gets to decide it has enough.
+func TestStreamMboxMessages_StopsEarly(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "INBOX")
+	if err := os.WriteFile(path, []byte(testMbox), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var seen []string
+	err := streamMboxMessages(path, "jan@example.com", "INBOX", "thunderbird", func(m models.Message) bool {
+		seen = append(seen, m.Subject)
+		return len(seen) < 2 // stop after the second valid message
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(seen) != 2 {
+		t.Fatalf("got %d messages, want exactly 2 (visit should have stopped iteration)", len(seen))
+	}
+	if seen[0] != "First message" || seen[1] != "Second message" {
+		t.Errorf("seen = %v", seen)
+	}
+}
+
+// The OOM bug (mailctl#1): parseMboxFile/FetchInbox used to retain every
+// message in the mbox before truncating to the requested count. mboxWindow
+// is the bounded replacement — it must never hold more than `limit`
+// messages at once, keeping only the newest (last-seen) ones.
+func TestMboxWindow_BoundsToLimit(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "INBOX")
+	if err := os.WriteFile(path, []byte(testMbox), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	window, err := mboxWindow(path, "jan@example.com", "INBOX", "thunderbird", 2, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(window) != 2 {
+		t.Fatalf("got %d messages, want 2 (bounded by limit)", len(window))
+	}
+	// The mbox has 4 valid (non-expunged) messages in file order ending
+	// with "Grüße vom Büro" — the window must keep the trailing two, not
+	// the first two.
+	if window[0].Subject != "Vertrag über 100 €" || window[1].Subject != "Grüße vom Büro" {
+		t.Errorf("window = %q, %q — want the two newest (last in file order)", window[0].Subject, window[1].Subject)
+	}
+}
+
+func TestMboxWindow_AppliesKeepPredicate(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "INBOX")
+	if err := os.WriteFile(path, []byte(testMbox), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Only "Second message" (X-Mozilla-Status 0000) is unread among the
+	// first two; mirrors FetchInbox's unreadOnly filter.
+	window, err := mboxWindow(path, "jan@example.com", "INBOX", "thunderbird", 10, func(m models.Message) bool {
+		return !m.Read
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range window {
+		if m.Subject == "First message" {
+			t.Errorf("window includes read message %q, keep predicate should have excluded it", m.Subject)
 		}
 	}
 }
