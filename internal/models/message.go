@@ -3,18 +3,18 @@ package models
 import "time"
 
 type Message struct {
-	ID          string    `json:"id"`
-	Subject     string    `json:"subject"`
-	From        string    `json:"from"`
-	To          []string  `json:"to"`
-	CC          []string  `json:"cc,omitempty"`
-	Body        string    `json:"body"`
-	Date        time.Time `json:"date"`
-	Read        bool      `json:"read"`
-	Mailbox     string    `json:"mailbox"`
-	Account     string    `json:"account"`
-	ThreadID    string    `json:"thread_id,omitempty"`
-	Source      string    `json:"source"` // "apple"
+	ID       string    `json:"id"`
+	Subject  string    `json:"subject"`
+	From     string    `json:"from"`
+	To       []string  `json:"to"`
+	CC       []string  `json:"cc,omitempty"`
+	Body     string    `json:"body"`
+	Date     time.Time `json:"date"`
+	Read     bool      `json:"read"`
+	Mailbox  string    `json:"mailbox"`
+	Account  string    `json:"account"`
+	ThreadID string    `json:"thread_id,omitempty"`
+	Source   string    `json:"source"` // "apple"
 }
 
 // Draft is the parsed content of a Markdown email file.

@@ -147,11 +147,11 @@ func (s *Store) UpsertMessage(ctx context.Context, m *models.Message) error {
 }
 
 type Filter struct {
-	Account  string
-	Mailbox  string
+	Account    string
+	Mailbox    string
 	UnreadOnly bool
-	Query    string
-	Limit    int
+	Query      string
+	Limit      int
 }
 
 func (s *Store) ListMessages(ctx context.Context, f Filter) ([]models.Message, error) {

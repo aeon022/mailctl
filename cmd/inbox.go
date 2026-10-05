@@ -3,11 +3,11 @@ package cmd
 import (
 	"fmt"
 
+	"context"
 	"github.com/aeon022/mailctl/internal/config"
 	"github.com/aeon022/mailctl/internal/mail"
 	"github.com/aeon022/mailctl/internal/store"
 	"github.com/spf13/cobra"
-	"context"
 )
 
 var (

@@ -218,4 +218,3 @@ func formatMessages(msgs []models.Message, heading string) string {
 	}
 	return b.String()
 }
-
