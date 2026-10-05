@@ -24,6 +24,7 @@ func (m Model) View() tea.View {
 	// notectl's v2 migration.
 	v.AltScreen = true
 	v.MouseMode = tea.MouseModeAllMotion
+	v.ReportFocus = true // FocusMsg → reload the list when the window regains focus
 	return v
 }
 

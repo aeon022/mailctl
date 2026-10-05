@@ -122,6 +122,7 @@ type Model struct {
 	aiDrafting bool
 	confirmID  string
 	loading    bool
+	lastLoad   time.Time // when msgsLoadedMsg last arrived; FocusMsg reloads only if this is stale
 
 	// "?" transient help popup
 	helpVP   viewport.Model

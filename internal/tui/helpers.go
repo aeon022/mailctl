@@ -561,13 +561,26 @@ func coloredDate(s string, t time.Time) string {
 	}
 }
 
+// copyToClipboardCmd copies via OSC 52 (works over SSH/tmux) and pbcopy
+// (for terminals that ignore OSC 52, e.g. Terminal.app).
 func copyToClipboardCmd(text string) tea.Cmd {
-	return func() tea.Msg {
+	return tea.Batch(tea.SetClipboard(text), func() tea.Msg {
 		cmd := exec.Command("pbcopy")
 		cmd.Stdin = strings.NewReader(text)
 		_ = cmd.Run()
 		return clipboardMsg{}
-	}
+	})
+}
+
+const focusReloadAfter = 5 * time.Second
+
+// browsingIdle reports whether the user is just looking at the message list:
+// no compose/detail/help view, search, palette, batch selection, template
+// picker, pending delete confirmation, or work in flight.
+func (m Model) browsingIdle() bool {
+	return m.view == viewList && !m.searching && !m.inPalette && !m.selecting &&
+		!m.templatePicking && m.confirmID == "" && !m.batchConfirmDelete &&
+		!m.syncing && !m.loading && !m.aiDrafting
 }
 
 func sameDay(a, b time.Time) bool {

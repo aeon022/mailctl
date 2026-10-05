@@ -63,8 +63,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.bodyArea.SetWidth(msg.Width - 12)
 		m.bodyArea.SetHeight(m.height - 12)
 
+	case tea.FocusMsg:
+		// Back in the window: refresh the list from the local DB (not a
+		// sync) — but only while just browsing, never under input or a
+		// pending confirmation, and not more often than every 5s.
+		if m.browsingIdle() && time.Since(m.lastLoad) > focusReloadAfter {
+			m.lastLoad = time.Now() // debounce focus flicker; no loading flag, so the list never blanks
+			return m, loadMsgsCmd(m.unreadOnly, m.activeAccount())
+		}
+		return m, nil
+
 	case msgsLoadedMsg:
 		m.loading = false
+		m.lastLoad = time.Now()
 		m.allMsgs = msg.msgs
 		m.msgs = filterMsgs(m.allMsgs, m.searchQ)
 		if len(msg.accounts) > 0 {
