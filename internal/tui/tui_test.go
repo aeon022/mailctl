@@ -336,3 +336,31 @@ func TestHighlightMatches_ColorsOnlyMatchedRunes(t *testing.T) {
 		t.Error("expected highlightMatches to differ from a plain render for a real match")
 	}
 }
+
+// Regression: in Bubble Tea v2 a space key press stringifies as "space", not
+// " " — a leftover `case " "` silently never matched. Drives real v2 key
+// presses through batch-select mode (v starts it, j moves, space toggles).
+func TestSpaceKey_TogglesBatchSelection(t *testing.T) {
+	m := New()
+	m.msgs = []models.Message{{ID: "a", Subject: "one"}, {ID: "b", Subject: "two"}}
+	m.cursor = 0
+
+	press := func(k tea.KeyPressMsg) {
+		tm, _ := m.Update(k)
+		m = tm.(Model)
+	}
+	press(tea.KeyPressMsg{Text: "v", Code: 'v'})
+	press(tea.KeyPressMsg{Text: "j", Code: 'j'})
+	if !m.selecting || !m.selected["a"] || m.selected["b"] {
+		t.Fatalf("setup: selecting=%v selected=%v", m.selecting, m.selected)
+	}
+
+	press(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
+	if !m.selected["b"] {
+		t.Fatalf("space did not select the cursor row: %v", m.selected)
+	}
+	press(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
+	if m.selected["b"] {
+		t.Errorf("second space did not deselect: %v", m.selected)
+	}
+}
