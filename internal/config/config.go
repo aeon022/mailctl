@@ -1,20 +1,23 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
 
 	coreconfig "github.com/aeon022/missionctl-core/config"
 	"github.com/aeon022/missionctl-core/licensing"
-	"github.com/spf13/viper"
 )
 
+// settings is this tool's config store (replaces the former global viper).
+var settings = coreconfig.NewStore("config")
+
 type Config struct {
-	DataDir          string `mapstructure:"data_dir"`
-	LicenseKey       string `mapstructure:"license_key"`
-	LicenseStatus    string `mapstructure:"license_status"`
-	LicenseBenefitID string `mapstructure:"license_benefit_id"`
+	DataDir          string `yaml:"data_dir"`
+	LicenseKey       string `yaml:"license_key"`
+	LicenseStatus    string `yaml:"license_status"`
+	LicenseBenefitID string `yaml:"license_benefit_id"`
 }
 
 // bundleBenefitID and mailctlBenefitID identify the missionctl Bundle's and
@@ -36,7 +39,7 @@ func IsPro() bool {
 }
 
 func PolarOrgID() string {
-	if v := viper.GetString("polar_org_id"); v != "" {
+	if v := settings.GetString("polar_org_id"); v != "" {
 		return v
 	}
 	return licensing.DefaultOrgID
@@ -45,9 +48,9 @@ func PolarOrgID() string {
 // SetLicense persists the license key/status/benefit to
 // ~/.config/mailctl/config.yaml and updates Active immediately.
 func SetLicense(key, status, benefitID string) error {
-	viper.Set("license_key", key)
-	viper.Set("license_status", status)
-	viper.Set("license_benefit_id", benefitID)
+	settings.Set("license_key", key)
+	settings.Set("license_status", status)
+	settings.Set("license_benefit_id", benefitID)
 	Active.LicenseKey = key
 	Active.LicenseStatus = status
 	Active.LicenseBenefitID = benefitID
@@ -56,7 +59,7 @@ func SetLicense(key, status, benefitID string) error {
 	if err := os.MkdirAll(cfgDir, 0755); err != nil {
 		return err
 	}
-	return viper.WriteConfigAs(filepath.Join(cfgDir, "config.yaml"))
+	return settings.Write(filepath.Join(cfgDir, "config.yaml"))
 }
 
 var Active Config
@@ -85,19 +88,16 @@ func Load() error {
 	cfgDir := filepath.Join(home, ".config", "mailctl")
 	_ = os.MkdirAll(cfgDir, 0755)
 
-	viper.SetConfigName("config")
-	viper.SetConfigType("yaml")
-	viper.AddConfigPath(cfgDir)
-	viper.SetEnvPrefix("MAILCTL")
-	viper.AutomaticEnv()
+	settings.SetEnvPrefix("MAILCTL")
+	settings.AddPath(cfgDir)
 
-	if err := viper.ReadInConfig(); err != nil {
-		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
+	if err := settings.Read(); err != nil {
+		if !errors.Is(err, coreconfig.ErrNotFound) {
 			return err
 		}
-		_ = viper.WriteConfigAs(filepath.Join(cfgDir, "config.yaml"))
+		_ = settings.Write(filepath.Join(cfgDir, "config.yaml"))
 	}
-	return viper.Unmarshal(&Active)
+	return settings.Unmarshal(&Active)
 }
 
 // DBPathOverride, when non-empty, overrides DBPath()'s return value. Used by tests
@@ -105,7 +105,7 @@ func Load() error {
 var DBPathOverride string
 
 // DBPath returns the database file path. DBPathOverride (test-only) wins
-// if set; otherwise data_dir (viper key, also settable via
+// if set; otherwise data_dir (config key, also settable via
 // MAILCTL_DATA_DIR) points it at a user-chosen directory — e.g. inside
 // iCloud Drive or Dropbox — resolved via coreconfig.ResolveDir; with
 // neither set, the private default (~/Library/Application Support/mailctl)
@@ -114,7 +114,7 @@ func DBPath() string {
 	if DBPathOverride != "" {
 		return DBPathOverride
 	}
-	if dir := viper.GetString("data_dir"); dir != "" {
+	if dir := settings.GetString("data_dir"); dir != "" {
 		resolved, _ := coreconfig.ResolveDir("mailctl", dir)
 		return filepath.Join(resolved, "mailctl.db")
 	}
@@ -126,7 +126,7 @@ func DBPath() string {
 // Shared reports whether DBPath currently resolves to a user-configured
 // directory (data_dir) rather than the tool's private default.
 func Shared() bool {
-	return DBPathOverride == "" && viper.GetString("data_dir") != ""
+	return DBPathOverride == "" && settings.GetString("data_dir") != ""
 }
 
 // appFile returns the path to name inside mailctl's private app-support
