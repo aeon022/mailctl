@@ -269,23 +269,28 @@ func New() Model {
 	si := textinput.New()
 	si.Placeholder = "search…"
 	si.CharLimit = 200
+	si.SetWidth(40) // v2: width 0 clips the placeholder to 1 char
 
 	pi := textinput.New()
 	pi.Placeholder = "command…"
 	pi.CharLimit = 40
+	pi.SetWidth(40) // v2: width 0 clips the placeholder to 1 char
 
 	to := textinput.New()
 	to.Placeholder = "to@example.com"
 	to.CharLimit = 500
 	to.Focus()
+	to.SetWidth(40) // v2: width 0 clips the placeholder to 1 char
 
 	sub := textinput.New()
 	sub.Placeholder = "Subject"
 	sub.CharLimit = 300
+	sub.SetWidth(40) // v2: width 0 clips the placeholder to 1 char
 
 	att := textinput.New()
 	att.Placeholder = "/path/to/file.pdf, /path/to/other.pdf"
 	att.CharLimit = 2000
+	att.SetWidth(40) // v2: width 0 clips the placeholder to 1 char
 
 	body := textarea.New()
 	body.Placeholder = "Write your message here…"
@@ -702,7 +707,7 @@ func (m Model) updateList(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			if m.cursor < len(m.msgs)-1 {
 				m.cursor++
 			}
-		case " ":
+		case "space":
 			m.batchConfirmDelete = false
 			if len(m.msgs) > 0 {
 				id := m.msgs[m.cursor].ID
