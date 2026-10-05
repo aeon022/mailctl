@@ -4,7 +4,7 @@ package mail
 
 import (
 	"fmt"
-	"os/exec"
+	"github.com/aeon022/missionctl-core/applescript"
 	"strings"
 	"time"
 
@@ -17,14 +17,14 @@ const sourceName = "apple"
 // Send sends an email via Apple Mail.
 func Send(d *models.Draft) error {
 	script := buildOutgoingScript(d, false)
-	_, err := runAppleScript(script)
+	_, err := applescript.Run(script)
 	return err
 }
 
 // SaveDraft saves an email to the Drafts folder via Apple Mail.
 func SaveDraft(d *models.Draft) error {
 	script := buildOutgoingScript(d, true)
-	_, err := runAppleScript(script)
+	_, err := applescript.Run(script)
 	return err
 }
 
@@ -35,13 +35,13 @@ func buildOutgoingScript(d *models.Draft, draftOnly bool) string {
 
 	accountLine := ""
 	if d.Account != "" {
-		accountLine = fmt.Sprintf(`set sender of msg to "%s"`, escapeAS(d.Account))
+		accountLine = fmt.Sprintf(`set sender of msg to "%s"`, applescript.EscapeLine(d.Account))
 	}
 
 	attachLines := ""
 	for _, a := range d.Attachments {
 		attachLines += fmt.Sprintf(`
-		make new attachment with properties {file name:(POSIX file "%s")} at after the last paragraph of content of msg`, escapeAS(a))
+		make new attachment with properties {file name:(POSIX file "%s")} at after the last paragraph of content of msg`, applescript.EscapeLine(a))
 	}
 
 	action := `send msg`
@@ -62,8 +62,8 @@ tell application "Mail"
 	%s
 end tell
 `,
-		escapeAS(d.Subject),
-		escapeAS(d.Body),
+		applescript.EscapeLine(d.Subject),
+		applescript.EscapeLine(d.Body),
 		accountLine,
 		toList,
 		ccList,
@@ -76,7 +76,7 @@ end tell
 func formatAddressList(addrs []string) string {
 	var lines []string
 	for _, a := range addrs {
-		lines = append(lines, fmt.Sprintf(`make new to recipient with properties {address:"%s"}`, escapeAS(a)))
+		lines = append(lines, fmt.Sprintf(`make new to recipient with properties {address:"%s"}`, applescript.EscapeLine(a)))
 	}
 	return strings.Join(lines, "\n\t\t")
 }
@@ -180,7 +180,7 @@ tell application "Mail"
 	return output
 end tell
 `, count, count, appleMsgDumpWithAccount)
-	out, err := runAppleScript(script)
+	out, err := applescript.Run(script)
 	if err != nil {
 		return nil, err
 	}
@@ -218,7 +218,7 @@ func FetchMessageBody(account, subject, from string) (string, error) {
 			end if
 		end repeat
 	end try
-`, escapeAS(account), escapeAS(subject), escapeAS(from))
+`, applescript.EscapeLine(account), applescript.EscapeLine(subject), applescript.EscapeLine(from))
 	}
 	script := fmt.Sprintf(`
 tell application "Mail"
@@ -261,8 +261,8 @@ tell application "Mail"
 	end repeat
 	return ""
 end tell
-`, accountBlock, escapeAS(subject), escapeAS(from), escapeAS(subject), escapeAS(from))
-	return runAppleScript(script)
+`, accountBlock, applescript.EscapeLine(subject), applescript.EscapeLine(from), applescript.EscapeLine(subject), applescript.EscapeLine(from))
+	return applescript.Run(script)
 }
 
 // SearchMessages searches all accounts for messages whose subject matches
@@ -296,8 +296,8 @@ tell application "Mail"
 	end repeat
 	return output
 end tell
-`, escapeAS(query), count, count, appleMsgDump)
-	out, err := runAppleScript(script)
+`, applescript.EscapeLine(query), count, count, appleMsgDump)
+	out, err := applescript.Run(script)
 	if err != nil {
 		return nil, err
 	}
@@ -323,8 +323,8 @@ tell application "Mail"
 	end repeat
 	return output
 end tell
-`, escapeAS(subject), count, count, appleMsgDumpWithAccount)
-	out, err := runAppleScript(script)
+`, applescript.EscapeLine(subject), count, count, appleMsgDumpWithAccount)
+	out, err := applescript.Run(script)
 	if err != nil {
 		return nil, err
 	}
@@ -341,7 +341,7 @@ tell application "Mail"
 	end repeat
 	return output
 end tell`
-	out, err := runAppleScript(script)
+	out, err := applescript.Run(script)
 	if err != nil {
 		return nil, err
 	}
@@ -371,7 +371,7 @@ tell application "Mail"
 		end repeat
 	end repeat
 end tell`, messageID)
-	_, err := runAppleScript(script)
+	_, err := applescript.Run(script)
 	return err
 }
 
@@ -402,7 +402,7 @@ tell application "Mail"
 	end repeat
 end tell
 return wasDeleted as string`, messageID)
-	out, err := runAppleScript(script)
+	out, err := applescript.Run(script)
 	if err != nil {
 		return err
 	}
@@ -429,7 +429,7 @@ tell application "Mail"
 		end repeat
 	end repeat
 end tell`, messageID)
-	_, err := runAppleScript(script)
+	_, err := applescript.Run(script)
 	return err
 }
 
@@ -506,23 +506,3 @@ func parseAppleDate(s string) time.Time {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-func runAppleScript(script string) (string, error) {
-	cmd := exec.Command("osascript", "-e", script)
-	out, err := cmd.Output()
-	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			return "", fmt.Errorf("osascript: %s", string(exitErr.Stderr))
-		}
-		return "", err
-	}
-	return strings.TrimSpace(string(out)), nil
-}
-
-func escapeAS(s string) string {
-	s = strings.ReplaceAll(s, `\`, `\\`)
-	s = strings.ReplaceAll(s, `"`, `\"`)
-	s = strings.ReplaceAll(s, "\n", `\n`)
-	s = strings.ReplaceAll(s, "\r", ``)
-	return s
-}
