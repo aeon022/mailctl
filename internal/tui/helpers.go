@@ -54,6 +54,27 @@ func (m *Model) focusCompose(f int) {
 	}
 }
 
+// dropMessages removes sel from BOTH the visible (filtered) list and allMsgs,
+// the full list search filters from. Editing only m.msgs left deleted mail in
+// allMsgs: it came back when the search cleared, and with no active filter
+// (msgs and allMsgs share one backing array) the in-place append corrupted
+// allMsgs into duplicates.
+func (m *Model) dropMessages(sel map[string]bool) {
+	m.msgs = removeMessages(m.msgs, sel)
+	m.allMsgs = removeMessages(m.allMsgs, sel)
+}
+
+// setRead sets the read flag of id in both the visible and the full list.
+func (m *Model) setRead(id string, read bool) {
+	for _, list := range [][]models.Message{m.msgs, m.allMsgs} {
+		for i := range list {
+			if list[i].ID == id {
+				list[i].Read = read
+			}
+		}
+	}
+}
+
 func (m *Model) setStatus(s string) {
 	m.status = s
 	m.statusTime = time.Now()

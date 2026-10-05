@@ -372,10 +372,8 @@ func (m Model) updateList(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				break
 			}
 			ids := selectedIDs(m.selected)
-			for i := range m.msgs {
-				if m.selected[m.msgs[i].ID] {
-					m.msgs[i].Read = true
-				}
+			for _, id := range ids {
+				m.setRead(id, true)
 			}
 			m.selecting = false
 			m.selected = nil
@@ -391,7 +389,7 @@ func (m Model) updateList(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			ids := selectedIDs(m.selected)
-			m.msgs = removeMessages(m.msgs, m.selected)
+			m.dropMessages(m.selected)
 			if m.cursor >= len(m.msgs) {
 				m.cursor = max(0, len(m.msgs)-1)
 			}
@@ -472,7 +470,7 @@ func (m Model) updateList(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.detail = &msg
 			// optimistic mark-read
 			if !msg.Read {
-				m.msgs[m.cursor].Read = true
+				m.setRead(msg.ID, true)
 				m.detail.Read = true
 			}
 			m.vp.SetContent("Loading body…")
@@ -489,7 +487,7 @@ func (m Model) updateList(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			id := m.msgs[m.cursor].ID
 			if m.confirmID == id {
 				m.confirmID = ""
-				m.msgs = append(m.msgs[:m.cursor], m.msgs[m.cursor+1:]...)
+				m.dropMessages(map[string]bool{id: true})
 				if m.cursor >= len(m.msgs) {
 					m.cursor = max(0, len(m.msgs)-1)
 				}
@@ -571,13 +569,7 @@ func (m Model) updateDetail(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "u":
 		if m.detail != nil {
 			m.detail.Read = false
-			// reflect in list
-			for i := range m.msgs {
-				if m.msgs[i].ID == m.detail.ID {
-					m.msgs[i].Read = false
-					break
-				}
-			}
+			m.setRead(m.detail.ID, false) // reflect in the list
 			return m, markUnreadCmd(m.detail.ID)
 		}
 	case "U":
@@ -598,14 +590,9 @@ func (m Model) updateDetail(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			id := m.detail.ID
 			if m.confirmID == id {
 				m.confirmID = ""
-				for i := range m.msgs {
-					if m.msgs[i].ID == id {
-						m.msgs = append(m.msgs[:i], m.msgs[i+1:]...)
-						if m.cursor >= len(m.msgs) {
-							m.cursor = max(0, len(m.msgs)-1)
-						}
-						break
-					}
+				m.dropMessages(map[string]bool{id: true})
+				if m.cursor >= len(m.msgs) {
+					m.cursor = max(0, len(m.msgs)-1)
 				}
 				m.detail = nil
 				m.view = viewList
