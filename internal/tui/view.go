@@ -8,10 +8,12 @@ import (
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/aeon022/missionctl-core/emptystate"
 	"github.com/aeon022/missionctl-core/humanize"
 	"github.com/aeon022/missionctl-core/keymap"
 	"github.com/aeon022/missionctl-core/overlay"
 	"github.com/aeon022/missionctl-core/palette"
+	"github.com/aeon022/missionctl-core/statusbar"
 )
 
 // ── View ──────────────────────────────────────────────────────────────────────
@@ -41,7 +43,7 @@ func (m Model) viewContent() string {
 		// "?" is only reachable from the main list, so the list is always
 		// the correct background to keep visible behind the popup. No
 		// enclosing border on the list view, so inset 0 is safe.
-		return overlay.Center(m.renderList(), m.renderHelpPopup(), m.width, m.height, 0)
+		return overlay.CenterDim(m.renderList(), m.renderHelpPopup(), m.width, m.height, 0)
 	default:
 		return m.renderList()
 	}
@@ -213,9 +215,9 @@ func (m Model) renderList() string {
 
 	preListLines := strings.Count(b.String(), "\n")
 	if m.loading {
-		b.WriteString("\n  " + m.sp.View() + styleHelp.Render(" Loading messages…") + "\n")
+		b.WriteString(emptystate.Loading(w, listH, m.sp.View(), "Loading messages…") + "\n")
 	} else if len(m.msgs) == 0 {
-		b.WriteString("\n" + styleHelp.Render("  No messages — press s to sync") + "\n")
+		b.WriteString(emptystate.Render(w, listH, "✉", "No messages", "press s to sync") + "\n")
 	} else {
 		lines, cursorLine := m.buildListLines(w)
 		start := 0
@@ -237,7 +239,7 @@ func (m Model) renderList() string {
 	// ── status / help bar ──
 	countStr := ""
 	if len(m.msgs) > 0 {
-		countStr = styleHelp.Render(fmt.Sprintf(" %d/%d", m.cursor+1, len(m.msgs)))
+		countStr = styleHelp.Render(fmt.Sprintf("%d/%d", m.cursor+1, len(m.msgs)))
 	}
 	var helpBar string
 	if m.err != nil {
@@ -245,21 +247,15 @@ func (m Model) renderList() string {
 	} else if m.status != "" {
 		helpBar = styleOK.Render("✓ " + m.status)
 	} else {
-		helpBar = styleHelp.Render("enter:open  n:new  s:sync  u:unread  d:delete  y:copy  o:mail  /:search  tab:acct  ?:help  q:quit")
-	}
-	rightPad := w - lipgloss.Width(helpBar) - lipgloss.Width(countStr)
-	if rightPad < 0 {
-		// No room for both — drop countStr rather than clamp the pad to 0
-		// and append it anyway, which silently overflows w whenever the
-		// message count (changes with no resize or user action) gets wide.
-		countStr = ""
-		rightPad = w - lipgloss.Width(helpBar)
-		if rightPad < 0 {
-			rightPad = 0
-		}
+		helpBar = statusbar.Hints(w-lipgloss.Width(countStr)-2,
+			[2]string{"enter", "open"}, [2]string{"n", "new"}, [2]string{"s", "sync"}, [2]string{"?", "help"},
+			[2]string{"q", "quit"}, [2]string{"/", "search"}, [2]string{"u", "unread"}, [2]string{"d", "delete"},
+			[2]string{"y", "copy"}, [2]string{"o", "mail"}, [2]string{"tab", "acct"})
 	}
 	b.WriteString(styleDivider.Render(strings.Repeat("─", w)) + "\n")
-	b.WriteString(helpBar + strings.Repeat(" ", rightPad) + countStr)
+	// Line keeps the count flush right and truncates the left side (never the
+	// count, never past w) when a long error/status message leaves no room.
+	b.WriteString(statusbar.Line(w, helpBar, countStr))
 	return b.String()
 }
 
@@ -325,11 +321,12 @@ func (m Model) renderDetail() string {
 
 	// ── footer ──
 	b.WriteString("\n\n" + styleDivider.Render(strings.Repeat("─", w)) + "\n")
-	helpLine := "esc:back  r:reply  a:ai draft  u:unread  d:delete  y:copy  o:mail  ↑↓/jk:scroll  q:quit"
+	hints := [][2]string{{"esc", "back"}, {"r", "reply"}, {"q", "quit"}, {"a", "ai draft"}, {"u", "unread"},
+		{"d", "delete"}, {"y", "copy"}, {"o", "mail"}, {"↑↓/jk", "scroll"}}
 	if m.detail != nil && findUnsubscribeURL(m.detail.Body) != "" {
-		helpLine += "  U:unsubscribe"
+		hints = append(hints, [2]string{"U", "unsubscribe"})
 	}
-	b.WriteString(styleHelp.Render(helpLine))
+	b.WriteString(statusbar.Hints(w, hints...))
 	if m.aiDrafting {
 		b.WriteString("\n  " + m.sp.View() + styleSyncing.Render(" Drafting a reply…"))
 	} else if m.err != nil {

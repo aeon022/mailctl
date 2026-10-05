@@ -10,7 +10,10 @@ import (
 
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/aeon022/mailctl/internal/models"
+	"github.com/aeon022/missionctl-core/tuitest"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // TestProgramSmoke drives the real tea.Program end to end (the same wiring
@@ -155,4 +158,75 @@ func (s *safeBuf) String() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.buf.String()
+}
+
+// ── tuitest-based smoke runs: every view/mode, wide + narrow + empty ─────────
+
+// visitEverything walks list → detail → help → search → palette → batch →
+// account tab → compose → template picker, leaving each with esc.
+var visitEverything = []string{
+	"j", "k", "enter", "esc", // detail
+	"?", "esc", // help popup
+	"/", "i", "n", "esc", "esc", // search
+	":", "esc", // palette
+	"v", "space", "esc", // batch select
+	"tab", "shift+tab", // account tabs
+	"n", "ctrl+t", "esc", "esc", "esc", // compose + template picker
+	"q",
+}
+
+func TestSmokeAllViews(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		w, h int
+		msgs []models.Message
+	}{
+		{"wide", 100, 30, sample()},
+		{"narrow", 60, 15, sample()},
+		{"empty", 100, 30, nil},
+		{"empty-narrow", 60, 15, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newTestModel(t, tc.msgs...)
+			m.width, m.height = tc.w, tc.h
+			var tm tea.Model = m
+			tm, _ = tuitest.Send(tm, tuitest.Resize(tc.w, tc.h))
+			tuitest.Smoke(t, tm, visitEverything...)
+		})
+	}
+}
+
+func TestFootersNeverWrap(t *testing.T) {
+	msg := sample()[0]
+	msg.Body = "unsubscribe: <https://x.test/unsub?id=1>"
+	for _, w := range []int{60, 80, 100} {
+		m := newTestModel(t, sample()...)
+		m.width, m.height = w, 30
+		for name, text := range map[string]string{
+			"list": ansi.Strip(m.renderList()),
+			"detail": func() string {
+				d := m
+				d.detail = &msg
+				d.view = viewDetail
+				return ansi.Strip(d.renderDetail())
+			}(),
+		} {
+			for _, l := range strings.Split(text, "\n") {
+				if lw := lipgloss.Width(l); lw > w {
+					t.Errorf("%s at width %d: line is %d wide: %q", name, w, lw, l)
+				}
+			}
+		}
+	}
+}
+
+func TestEmptyAndLoadingStates(t *testing.T) {
+	m := newTestModel(t)
+	if out := ansi.Strip(m.renderList()); !strings.Contains(out, "Loading messages…") {
+		t.Errorf("a fresh model is loading:\n%s", out)
+	}
+	m.loading = false
+	if out := ansi.Strip(m.renderList()); !strings.Contains(out, "No messages") || !strings.Contains(out, "press s to sync") {
+		t.Errorf("empty list should show the emptystate hint:\n%s", out)
+	}
 }
