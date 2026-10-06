@@ -4,6 +4,7 @@ package mail
 
 import (
 	"fmt"
+	"github.com/aeon022/mailctl/internal/unsub"
 	"github.com/aeon022/missionctl-core/applescript"
 	"strings"
 	"time"
@@ -197,6 +198,28 @@ end tell
 // every-account, every-mailbox scan if account is empty or the message isn't
 // found there (e.g. it moved to Sent/Archive/Trash since last sync).
 func FetchMessageBody(account, subject, from string) (string, error) {
+	return fetchMessageProperty(account, subject, from, "content of m")
+}
+
+// FetchUnsubscribeHeaders returns the List-Unsubscribe / List-Unsubscribe-Post
+// header values of the message matching subject+from, read from Mail.app's
+// "all headers" of the message (same lookup as FetchMessageBody).
+func FetchUnsubscribeHeaders(account, subject, from string) (listUnsub, post string, err error) {
+	raw, err := fetchMessageProperty(account, subject, from, "all headers of m")
+	if err != nil {
+		return "", "", err
+	}
+	if raw == "" {
+		return "", "", fmt.Errorf("message not found: subject=%q from=%q", subject, from)
+	}
+	listUnsub, post = unsub.ParseRawHeaders(raw)
+	return listUnsub, post, nil
+}
+
+// fetchMessageProperty finds one message by subject+sender (its account's
+// inbox first, then every mailbox) and returns the AppleScript expression
+// expr evaluated on it, e.g. "content of m".
+func fetchMessageProperty(account, subject, from, expr string) (string, error) {
 	accountBlock := ""
 	if account != "" {
 		accountBlock = fmt.Sprintf(`
@@ -262,6 +285,7 @@ tell application "Mail"
 	return ""
 end tell
 `, accountBlock, applescript.EscapeLine(subject), applescript.EscapeLine(from), applescript.EscapeLine(subject), applescript.EscapeLine(from))
+	script = strings.ReplaceAll(script, "return content of m", "return "+expr)
 	return applescript.Run(script)
 }
 

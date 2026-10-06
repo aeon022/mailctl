@@ -146,6 +146,24 @@ func (s *Store) UpsertMessage(ctx context.Context, m *models.Message) error {
 	return err
 }
 
+// GetMessage returns the cached message with the given ID, or sql.ErrNoRows.
+func (s *Store) GetMessage(ctx context.Context, id string) (*models.Message, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id,subject,from_addr,to_addrs,cc_addrs,body,date,read,mailbox,account,thread_id,source
+		FROM messages WHERE id=?`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	msgs, err := scanMessages(rows)
+	if err != nil {
+		return nil, err
+	}
+	if len(msgs) == 0 {
+		return nil, sql.ErrNoRows
+	}
+	return &msgs[0], nil
+}
+
 type Filter struct {
 	Account    string
 	Mailbox    string

@@ -82,6 +82,33 @@ func FetchMessageBody(account, subject, from string) (string, error) {
 	return "", fmt.Errorf("message not found: subject=%q from=%q", subject, from)
 }
 
+// FetchUnsubscribeHeaders returns the List-Unsubscribe / List-Unsubscribe-Post
+// header values of the message matching subject+from (same lookup as
+// FetchMessageBody) — read straight from the mbox headers.
+func FetchUnsubscribeHeaders(account, subject, from string) (listUnsub, post string, err error) {
+	accounts, err := thunderbirdAccounts()
+	if err != nil {
+		return "", "", err
+	}
+	for _, acc := range accounts {
+		if account != "" && acc.Email != account {
+			continue
+		}
+		found := false
+		streamMboxMessages(inboxPath(acc), acc.Email, "INBOX", sourceName, func(m models.Message) bool {
+			if m.Subject == subject && strings.Contains(m.From, from) {
+				listUnsub, post, found = m.ListUnsubscribe, m.ListUnsubscribePost, true
+				return false
+			}
+			return true
+		})
+		if found {
+			return listUnsub, post, nil
+		}
+	}
+	return "", "", fmt.Errorf("message not found: subject=%q from=%q", subject, from)
+}
+
 // SearchMessages scans every account's inbox for a subject match, mirroring
 // apple.go's subject-only live search.
 func SearchMessages(query string, count int) ([]models.Message, error) {

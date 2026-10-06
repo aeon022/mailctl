@@ -307,3 +307,24 @@ func TestMboxWindow_AppliesKeepPredicate(t *testing.T) {
 		}
 	}
 }
+
+func TestParseMboxMessage_KeepsUnsubscribeHeaders(t *testing.T) {
+	raw := []byte("From - Mon Jan 05 10:00:00 2026\n" +
+		"From: News <news@list.test>\n" +
+		"Subject: Weekly\n" +
+		"Date: Mon, 05 Jan 2026 10:00:00 +0000\n" +
+		"Message-Id: <w1@list.test>\n" +
+		"List-Unsubscribe: <mailto:unsub@list.test?subject=bye>,\n <https://list.test/u/1>\n" +
+		"List-Unsubscribe-Post: List-Unsubscribe=One-Click\n" +
+		"\nbody\n")
+	m, err := parseMboxMessage(raw, "jan@example.com", "INBOX", "thunderbird")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(m.ListUnsubscribe, "<https://list.test/u/1>") || !strings.Contains(m.ListUnsubscribe, "mailto:unsub@list.test") {
+		t.Errorf("ListUnsubscribe (folded header must be joined) = %q", m.ListUnsubscribe)
+	}
+	if m.ListUnsubscribePost != "List-Unsubscribe=One-Click" {
+		t.Errorf("ListUnsubscribePost = %q", m.ListUnsubscribePost)
+	}
+}

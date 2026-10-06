@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -221,5 +223,24 @@ func TestDeleteBySource(t *testing.T) {
 	}
 	if len(msgs) != 1 || msgs[0].ID != "gmail-1" {
 		t.Fatalf("expected only gmail-1 to remain, got %+v", msgs)
+	}
+}
+
+func TestGetMessage(t *testing.T) {
+	s, err := New(t.TempDir()+"/m.db", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+	if err := s.UpsertMessage(ctx, &models.Message{ID: "m1", Subject: "Hi", From: "a@b.test", Account: "acc", Date: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.GetMessage(ctx, "m1")
+	if err != nil || got.Subject != "Hi" || got.Account != "acc" {
+		t.Fatalf("GetMessage = %+v, %v", got, err)
+	}
+	if _, err := s.GetMessage(ctx, "nope"); !errors.Is(err, sql.ErrNoRows) {
+		t.Errorf("missing id: %v", err)
 	}
 }

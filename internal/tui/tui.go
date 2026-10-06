@@ -82,6 +82,7 @@ type Model struct {
 	// taskctl's own select mode uses.
 	selecting          bool
 	selected           map[string]bool // keyed by message ID
+	unsubPrompt        *unsubPrompt    // confirm popup for "U" in the detail view
 	batchConfirmDelete bool            // "d" once arms it, "d" again executes — mirrors the single-message m.confirmID press-twice pattern
 
 	// tabs

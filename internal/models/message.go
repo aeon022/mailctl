@@ -15,6 +15,12 @@ type Message struct {
 	Account  string    `json:"account"`
 	ThreadID string    `json:"thread_id,omitempty"`
 	Source   string    `json:"source"` // "apple"
+
+	// Raw List-Unsubscribe / List-Unsubscribe-Post header values. Set only by
+	// backends that parse headers while reading (Thunderbird); never persisted —
+	// the unsubscribe flow fetches them on demand per message.
+	ListUnsubscribe     string `json:"list_unsubscribe,omitempty"`
+	ListUnsubscribePost string `json:"list_unsubscribe_post,omitempty"`
 }
 
 // Draft is the parsed content of a Markdown email file.

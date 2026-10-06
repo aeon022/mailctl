@@ -123,6 +123,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.vp.SetContent(formatDetail(m.detail, m.detailRawWidth()))
 		}
 
+	case unsubTargetMsg:
+		if m.detail == nil || m.detail.ID != msg.msgID {
+			return m, nil // user left the message meanwhile
+		}
+		if !msg.ok {
+			m.setStatus("No unsubscribe option found in this email")
+			return m, nil
+		}
+		m.status = ""
+		m.unsubPrompt = &unsubPrompt{msgID: msg.msgID, sender: msg.sender, target: msg.target, fromBody: msg.fromBody}
+
+	case unsubDoneMsg:
+		if msg.err != nil {
+			m.setStatus("✗ Unsubscribe failed: " + msg.err.Error())
+		} else if msg.via == "one-click" {
+			m.setStatus("✓ Unsubscribe request accepted")
+		} else {
+			m.setStatus("Unsubscribe page opened in your browser")
+		}
+
 	case readMarkedMsg:
 		// local state already updated optimistically
 
@@ -563,6 +583,9 @@ func (m Model) updateList(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) updateDetail(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if m.unsubPrompt != nil {
+		return m.handleUnsubKey(msg.String())
+	}
 	switch msg.String() {
 	case "q", "esc":
 		if m.confirmID != "" {
@@ -585,11 +608,8 @@ func (m Model) updateDetail(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	case "U":
 		if m.detail != nil {
-			if link := findUnsubscribeURL(m.detail.Body); link != "" {
-				m.setStatus("Opening unsubscribe link…")
-				return m, openURLCmd(link)
-			}
-			m.setStatus("No unsubscribe link found in this email")
+			m.setStatus("Looking for the unsubscribe option…")
+			return m, findUnsubCmd(*m.detail)
 		}
 	case "y":
 		if m.detail != nil {

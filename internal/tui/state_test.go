@@ -187,15 +187,11 @@ func TestDetailKeys(t *testing.T) {
 		t.Errorf("u: detail.Read=%v msgs[0].Read=%v cmd=%v", m.detail.Read, m.msgs[0].Read, cmd != nil)
 	}
 
-	// U with a real link opens it; without one it only reports
-	m.detail.Body = "bye\nUnsubscribe: https://mail.test/unsubscribe?id=1 \nthanks"
-	if _, cmd = press(t, m, "U"); cmd == nil {
-		t.Error("U with an unsubscribe link must return a command")
-	}
-	m.detail.Body = "no link here"
+	// U starts the (async) unsubscribe lookup; outcomes and the confirm popup
+	// are covered in unsub_test.go
 	m, cmd = press(t, m, "U")
-	if cmd != nil || !strings.Contains(m.status, "No unsubscribe link") {
-		t.Errorf("U without link: cmd=%v status=%q", cmd != nil, m.status)
+	if cmd == nil || !strings.Contains(m.status, "Looking for the unsubscribe option") {
+		t.Errorf("U: cmd=%v status=%q", cmd != nil, m.status)
 	}
 
 	// a (AI draft) is a Bundle feature
@@ -209,7 +205,7 @@ func TestDetailKeys(t *testing.T) {
 	if m.view != viewCompose || m.toInput.Value() != "bill@corp.test" || m.subjectInput.Value() != "Re: Invoice March" {
 		t.Errorf("reply: view=%v to=%q subject=%q", m.view, m.toInput.Value(), m.subjectInput.Value())
 	}
-	if !strings.Contains(m.bodyArea.Value(), "> no link here") {
+	if !strings.Contains(m.bodyArea.Value(), "> pay now") {
 		t.Errorf("reply body must quote the original: %q", m.bodyArea.Value())
 	}
 	m, _ = press(t, m, "esc")

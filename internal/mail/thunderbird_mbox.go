@@ -192,6 +192,9 @@ func parseMboxMessage(raw []byte, account, mailboxName, source string) (models.M
 		Mailbox: mailboxName,
 		Account: account,
 		Source:  source,
+
+		ListUnsubscribe:     m.Header.Get("List-Unsubscribe"),
+		ListUnsubscribePost: m.Header.Get("List-Unsubscribe-Post"),
 	}, nil
 }
 

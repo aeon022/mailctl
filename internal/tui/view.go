@@ -33,6 +33,9 @@ func (m Model) View() tea.View {
 func (m Model) viewContent() string {
 	switch m.view {
 	case viewDetail:
+		if m.unsubPrompt != nil {
+			return overlay.CenterDim(m.renderDetail(), m.renderUnsubPopup(), m.width, m.height, 0)
+		}
 		return m.renderDetail()
 	case viewCompose:
 		if m.templatePicking {
@@ -323,9 +326,7 @@ func (m Model) renderDetail() string {
 	b.WriteString("\n\n" + styleDivider.Render(strings.Repeat("─", w)) + "\n")
 	hints := [][2]string{{"esc", "back"}, {"r", "reply"}, {"q", "quit"}, {"a", "ai draft"}, {"u", "unread"},
 		{"d", "delete"}, {"y", "copy"}, {"o", "mail"}, {"↑↓/jk", "scroll"}}
-	if m.detail != nil && findUnsubscribeURL(m.detail.Body) != "" {
-		hints = append(hints, [2]string{"U", "unsubscribe"})
-	}
+	hints = append(hints, [2]string{"U", "unsubscribe"})
 	b.WriteString(statusbar.Hints(w, hints...))
 	if m.aiDrafting {
 		b.WriteString("\n  " + m.sp.View() + styleSyncing.Render(" Drafting a reply…"))
