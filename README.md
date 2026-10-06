@@ -252,7 +252,7 @@ mailctl license status
 | `U` | Open unsubscribe link in browser (shown only when detected) |
 | `d` | Delete message |
 | `o` | Open in Apple Mail |
-| `y` | Copy message to clipboard |
+| `y` | Copy subject + sender to clipboard |
 | `q` | Quit |
 
 ### Compose view
@@ -364,6 +364,20 @@ Claude calls `send_email` once per recipient, substituting the name field each t
 Ask Claude: *"Find the thread about the vendor contract and draft a reply saying we need one more week."*
 
 Claude calls `search_email` to locate the thread, `email_thread` to retrieve the full context, then `draft_email` to save a reply for your review before sending.
+
+---
+
+## Recent changes (October 2026)
+
+- **Window focus.** When the terminal window regains focus, the list reloads from the local database — at most every 5 seconds, and only while you are just browsing (never while a form, editor, search, palette or confirmation is open, so nothing you are typing is lost). Terminals that don't report focus events simply never trigger it.
+
+- **Clipboard.** `y` copies the message's subject and sender (list and detail view) — now through OSC 52 as well as `pbcopy`, so it also works over SSH and inside tmux (your terminal must allow OSC 52; locally `pbcopy` still does the job).
+
+- **Footer and empty states.** The key-hint footer is the suite-wide one: it never wraps and drops the least important hints first on narrow terminals. Empty lists and loading screens show a short message with a hint what to press.
+
+- **Deleting with a filter active.** Deleting (in the list, in the detail view, or in batch mode) while a search is active now updates the full list too: messages no longer reappear after `esc`, and read/unread status survives clearing the search.
+
+- The TUI now runs on Bubble Tea v2; key bindings are unchanged.
 
 ---
 
