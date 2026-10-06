@@ -249,7 +249,7 @@ mailctl license status
 | `r` | Reply (opens compose with quoted text) |
 | `a` | AI draft reply (missionctl Bundle feature, see Requirements) |
 | `u` | Mark as unread |
-| `U` | Open unsubscribe link in browser (shown only when detected) |
+| `U` | Unsubscribe: reads the message's `List-Unsubscribe` headers and shows a confirm popup (sender + method); `enter`/`y` confirms, `esc`/`n` cancels. Nothing happens before you confirm |
 | `d` | Delete message |
 | `o` | Open in Apple Mail |
 | `y` | Copy subject + sender to clipboard |
@@ -366,6 +366,25 @@ Ask Claude: *"Find the thread about the vendor contract and draft a reply saying
 Claude calls `search_email` to locate the thread, `email_thread` to retrieve the full context, then `draft_email` to save a reply for your review before sending.
 
 ---
+
+### Unsubscribe
+
+`U` in the detail view (or `mailctl unsubscribe <message-id> [--yes]`) picks the
+best method the message offers, in this order, and always asks first:
+
+1. **One-click (RFC 8058)** — `List-Unsubscribe-Post` present and an `https:` target:
+   mailctl sends a POST with the body `List-Unsubscribe=One-Click` (15 s timeout, at
+   most one redirect, https only).
+2. **Link** — opens the `https:` page in your browser. A plain `http:` link is only
+   ever offered this way, never POSTed.
+3. **mailto** — opens the compose view pre-filled (recipient, subject, body from the
+   header); mailctl never sends it for you. `mailctl unsubscribe` saves a draft
+   instead; where that isn't possible (Linux) it prints the address and subject.
+
+Without usable headers it falls back to a link found near the word "unsubscribe" in
+the message text, marked *guessed* in the popup. Headers come straight from the mbox
+on Thunderbird/Linux and from an on-demand AppleScript call on Apple Mail (fetched
+when you press `U`, not cached).
 
 ## Recent changes (October 2026)
 
