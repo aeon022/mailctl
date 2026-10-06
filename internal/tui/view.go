@@ -9,7 +9,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/aeon022/missionctl-core/emptystate"
-	"github.com/aeon022/missionctl-core/humanize"
 	"github.com/aeon022/missionctl-core/keymap"
 	"github.com/aeon022/missionctl-core/overlay"
 	"github.com/aeon022/missionctl-core/palette"
@@ -131,33 +130,8 @@ func (m Model) renderList() string {
 
 	// ── account tab bar ──
 	if len(m.accounts) > 0 {
-		// Reserve the syncing indicator's own room BEFORE handing tabWindow
-		// its budget — otherwise it competes with tab entries for the same
-		// width and MaxWidth's truncation (a last-resort safety net, not
-		// meant to be relied on) can cut it off right when you'd want to
-		// see it confirm a sync actually started.
-		syncSuffix := ""
-		if m.syncing {
-			syncSuffix = "  " + m.sp.View() + styleSyncing.Render(" syncing…")
-		} else if !m.lastSynced.IsZero() {
-			syncSuffix = "  " + styleMeta.Render("synced "+humanize.TimeAgo(m.lastSynced))
-		}
-		entries, hasLeft, hasRight := m.tabWindow(w - 4 - lipgloss.Width(syncSuffix))
-		var sb strings.Builder
-		if hasLeft {
-			sb.WriteString(styleMeta.Render("‹ "))
-		}
-		for i, e := range entries {
-			if i > 0 {
-				sb.WriteString("  ")
-			}
-			sb.WriteString(e.text)
-		}
-		if hasRight {
-			sb.WriteString(styleMeta.Render(" ›"))
-		}
-		bar := sb.String() + syncSuffix
-		b.WriteString(lipgloss.NewStyle().MaxWidth(w).Render(bar) + "\n")
+		bar, _ := m.tabBar(m.tabBudget())
+		b.WriteString(lipgloss.NewStyle().MaxWidth(w).Render(bar+m.syncSuffix()) + "\n")
 	} else if m.syncing {
 		b.WriteString(m.sp.View() + styleSyncing.Render(" syncing…") + "\n")
 	} else {

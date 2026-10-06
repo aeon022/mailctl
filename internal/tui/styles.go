@@ -65,8 +65,6 @@ var (
 			Background(theme.SelectedBgV2).
 			Foreground(theme.SelectedFgV2).
 			Bold(true)
-	styleAcctBadge = lipgloss.NewStyle().
-			Foreground(adaptiveColor("25", "75"))
 
 	// detail / compose
 	styleHeader  = lipgloss.NewStyle().Bold(true).Foreground(colorBlue)

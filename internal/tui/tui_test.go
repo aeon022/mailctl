@@ -11,6 +11,8 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/aeon022/mailctl/internal/models"
 	"github.com/aeon022/missionctl-core/palette"
+	"github.com/aeon022/missionctl-core/theme"
+	"github.com/aeon022/missionctl-core/tuitest"
 	"github.com/charmbracelet/x/ansi"
 	runewidth "github.com/mattn/go-runewidth"
 )
@@ -274,16 +276,13 @@ func mustParseMailDate(t *testing.T, s string) time.Time {
 }
 
 func TestFormatListRow_StyleSurvivesPastTheDateAndFromColumns(t *testing.T) {
-	// Regression test: formatListRow used to be wrapped in a single outer
-	// styleRead/styleUnread/styleSelected.Render() call at the caller. The
-	// date and from columns carry their OWN independent colors, and each
-	// one's Render() ends with a full SGR reset — which clobbered the
-	// outer style for everything after it (confirmed with a forced ANSI
-	// profile: the subject text lost its bold/muted/selected styling
-	// entirely). formatListRow now applies rowStyle per-segment instead;
-	// verify rowStyle's own escape code reappears AFTER the from column.
+	// Regression test: the date and from columns carry their OWN colors and
+	// each ends with a full SGR reset, which clobbered an outer style for
+	// everything after them (the subject lost its bold/muted styling).
+	// Segments are styled individually; verify the row style's escape code
+	// reappears AFTER the from column.
 	msg := models.Message{Subject: "hello", From: "Alice <a@example.com>", Date: time.Now(), Read: false}
-	row := formatListRow(&msg, 60, false, styleUnread, "")
+	row := formatListRow(&msg, 60, false, rowNormal, "")
 
 	openCode := strings.SplitN(styleUnread.Render("x"), "x", 2)[0]
 	fromIdx := strings.Index(row, "Alice")
@@ -295,33 +294,114 @@ func TestFormatListRow_StyleSurvivesPastTheDateAndFromColumns(t *testing.T) {
 	}
 }
 
-func TestFormatListRow_SelectedBackgroundSpansFullWidth(t *testing.T) {
-	// Regression test for the same bug: a selected row's background must
-	// fill the entire row width, not just up to wherever the first inner
-	// reset clobbered it.
-	msg := models.Message{Subject: "hi", From: "a@example.com", Date: time.Now(), Read: true}
-	row := formatListRow(&msg, 60, false, styleSelected, "")
-	if lipgloss.Width(row) != 60 {
-		t.Errorf("expected the rendered row to be exactly 60 columns wide, got %d", lipgloss.Width(row))
+func TestFormatListRow_SelectedIsOneContinuousBar(t *testing.T) {
+	// The selected row used to get its background per segment, leaving holes
+	// between the date, sender, account and subject columns (each has its own
+	// color). Now the whole line sits on ONE background: full width, accent
+	// bar first, and after every inner reset the background is painted again.
+	msg := models.Message{Subject: "hi", From: "Alice <a@example.com>", Account: "Brücke", Date: time.Now(), Read: true}
+	row := formatListRow(&msg, 70, true, rowSelected, "")
+	if lipgloss.Width(row) != 70 {
+		t.Errorf("expected the rendered row to be exactly 70 columns wide, got %d", lipgloss.Width(row))
 	}
+	if !strings.HasPrefix(ansi.Strip(row), "▌") {
+		t.Errorf("selected row must start with the accent bar, got %q", ansi.Strip(row))
+	}
+	bgOpen := strings.SplitN(lipgloss.NewStyle().Background(theme.SelectedBgV2).Render("x"), "x", 2)[0]
+	after := strings.Index(row, "▌") + len("▌")
+	body := row[after:]
+	resets := 0
+	for i := 0; ; {
+		j := strings.Index(body[i:], "\x1b[m")
+		if j < 0 {
+			break
+		}
+		i += j + len("\x1b[m")
+		resets++
+		if i < len(body) && !strings.HasPrefix(body[i:], bgOpen) {
+			t.Fatalf("hole in the selection: after a reset the background is not re-applied: %q", body[i:min(i+30, len(body))])
+		}
+	}
+	if resets < 3 {
+		t.Errorf("expected several inner resets (date/sender/account columns), got %d — test no longer exercises the hole case", resets)
+	}
+}
 
-	openCode := strings.SplitN(styleSelected.Render("x"), "x", 2)[0]
-	// Find the LAST styled segment and confirm only whitespace (the
-	// trailing padding) follows it before the final reset — rather than an
-	// arbitrary fixed-size tail slice, which risks cutting mid-escape-
-	// sequence and losing the leading "\x1b[" that openCode starts with.
-	lastOpen := strings.LastIndex(row, openCode)
-	if lastOpen == -1 {
-		t.Fatal("expected to find the selected style's escape code in the row at all")
+func TestFormatListRow_HoverIsContinuousToo(t *testing.T) {
+	msg := models.Message{Subject: "hi", From: "Alice <a@example.com>", Date: time.Now(), Read: true}
+	row := formatListRow(&msg, 60, false, rowHover, "")
+	if lipgloss.Width(row) != 60 || strings.Contains(ansi.Strip(row), "▌") {
+		t.Errorf("hover: width %d, plain %q (no accent bar expected)", lipgloss.Width(row), ansi.Strip(row))
 	}
-	// lipgloss v2 emits "\x1b[m" (no "0") for a reset, not v1's "\x1b[0m".
-	after := strings.TrimSuffix(row[lastOpen+len(openCode):], "\x1b[m")
-	after = strings.TrimSuffix(after, "\x1b[0m")
-	if after == "" {
-		t.Error("expected trailing padding spaces after the last styled segment")
+	hoverOpen := strings.SplitN(theme.HoverV2.Render("x"), "x", 2)[0]
+	fromIdx := strings.Index(row, "Alice")
+	if !strings.Contains(row[fromIdx:], hoverOpen) {
+		t.Error("hover background must continue past the sender column")
 	}
-	if strings.TrimSpace(after) != "" {
-		t.Errorf("expected only whitespace (padding) after the last styled segment, got %q", after)
+}
+
+func TestRowDate_OnlyWhatTheGroupHeaderDoesNotSay(t *testing.T) {
+	now := time.Now()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 10, 41, 0, 0, time.Local)
+	if got := rowDate(today, "Today"); got != "10:41" {
+		t.Errorf("Today group shows only the time, got %q", got)
+	}
+	if got := rowDate(today, "Yesterday"); got != "10:41" {
+		t.Errorf("Yesterday group shows only the time, got %q", got)
+	}
+	if got := rowDate(today, "Monday"); got != "10:41" {
+		t.Errorf("a weekday group shows only the time, got %q", got)
+	}
+	if got := rowDate(today, "Last week"); got != today.Format("Mon")+" 10:41" {
+		t.Errorf("Last week adds the weekday, got %q", got)
+	}
+	if got := rowDate(today, "March"); got != today.Format("Jan 02")+" 10:41" {
+		t.Errorf("older groups show day+month, got %q", got)
+	}
+	// the word "Today" must no longer be repeated inside a Today row
+	msg := models.Message{Subject: "s", From: "a@example.com", Date: today, Read: true}
+	if row := ansi.Strip(formatListRow(&msg, 80, false, rowNormal, "")); strings.Contains(row, "Today") || !strings.Contains(row, "10:41") {
+		t.Errorf("row under the Today header: %q", row)
+	}
+	for _, g := range []string{"Today", "Yesterday", "Monday", "Last week", "March"} {
+		if rowDateW(g) < len(rowDate(today, g)) {
+			t.Errorf("column width for %q (%d) is narrower than its text %q", g, rowDateW(g), rowDate(today, g))
+		}
+	}
+}
+
+func TestFormatListRow_AccountTagIsADotNotBrackets(t *testing.T) {
+	msg := models.Message{Subject: "hi", From: "a@example.com", Account: "Gerwin || Die Brücke", Date: time.Now(), Read: true}
+	row := ansi.Strip(formatListRow(&msg, 90, true, rowNormal, ""))
+	if strings.Contains(row, "[") || strings.Contains(row, "]") {
+		t.Errorf("no brackets around the account: %q", row)
+	}
+	if !strings.Contains(row, "● Brücke") {
+		t.Errorf("expected a dot and the short account name, got %q", row)
+	}
+	if lipgloss.Width(row) != 90 {
+		t.Errorf("width %d", lipgloss.Width(row))
+	}
+	// distinct accounts get stable, usually distinct colors
+	if acctStyle("A").Render("x") != acctStyle("A").Render("x") {
+		t.Error("account color must be stable")
+	}
+}
+
+func TestPreviewLineSharesTheSelectionBar(t *testing.T) {
+	m := newTestModel(t, models.Message{ID: "1", Subject: "s", From: "a@x.com", Date: time.Now(), Read: true, Body: "hello preview text here"})
+	mi, _ := tuitest.Send(m, tuitest.Resize(100, 20))
+	lines, cursorLine := mi.(Model).buildListLines(100)
+	if len(lines) < cursorLine+2 {
+		t.Fatalf("expected a preview line under the message row, got %d lines", len(lines))
+	}
+	if !strings.HasPrefix(ansi.Strip(lines[cursorLine+1]), "▌") || !strings.Contains(ansi.Strip(lines[cursorLine+1]), "hello preview") {
+		t.Errorf("selected message's preview line must carry the bar too: %q", ansi.Strip(lines[cursorLine+1]))
+	}
+	for i, l := range lines {
+		if lipgloss.Width(l) > 100 {
+			t.Errorf("line %d is %d wide", i, lipgloss.Width(l))
+		}
 	}
 }
 

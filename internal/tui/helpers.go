@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"hash/fnv"
 	"os/exec"
 	"strings"
 	"time"
@@ -9,7 +10,10 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/aeon022/mailctl/internal/models"
+	"github.com/aeon022/missionctl-core/humanize"
 	"github.com/aeon022/missionctl-core/theme"
+	"github.com/aeon022/missionctl-core/ui"
+	"github.com/charmbracelet/x/ansi"
 	runewidth "github.com/mattn/go-runewidth"
 	"github.com/sahilm/fuzzy"
 )
@@ -132,39 +136,28 @@ func (m Model) buildListLinesWithMapping(w int) ([]string, int, []int) {
 		}
 
 		// main row
-		var rowStyle lipgloss.Style
+		state := rowNormal
 		switch {
 		case i == m.cursor:
-			rowStyle = styleSelected
+			state = rowSelected
 		case i == m.hoverRow:
-			rowStyle = theme.HoverV2
-		case !msg.Read:
-			rowStyle = styleUnread
-		default:
-			rowStyle = styleRead
+			state = rowHover
 		}
-		row := formatListRow(msg, w, showAcct, rowStyle, m.searchQ)
+		rowW, prefix := w, ""
 		if m.selecting {
-			checkbox := styleMeta.Render("[ ] ")
+			rowW = w - 4 // the checkbox column keeps the whole line within w
+			prefix = styleMeta.Render("[ ] ")
 			if m.selected[msg.ID] {
-				checkbox = styleSelected.Render("[x]") + " "
+				prefix = styleSelected.Render("[x]") + " "
 			}
-			row = checkbox + row
 		}
-		lines = append(lines, row)
+		lines = append(lines, prefix+formatListRow(msg, rowW, showAcct, state, m.searchQ))
 		lineToMsg = append(lineToMsg, i)
 
-		// body preview (only when body is available)
-		if preview := formatPreview(msg, w, showAcct); preview != "" {
-			switch {
-			case i == m.cursor:
-				preview = styleSelected.Width(w).Render(preview)
-			case i == m.hoverRow:
-				preview = theme.HoverV2.Width(w).Render(preview)
-			default:
-				preview = styleMeta.Render(preview)
-			}
-			lines = append(lines, preview)
+		// body preview (only when body is available) — part of the same
+		// selection/hover bar as its message row
+		if preview := formatPreview(msg, rowW, showAcct); preview != "" {
+			lines = append(lines, prefix2(prefix)+paintRow(rowW, state, preview))
 			lineToMsg = append(lineToMsg, i)
 		}
 	}
@@ -192,71 +185,72 @@ func (m Model) listStartY() int {
 	return y
 }
 
-// tabEntry is one visible account tab: its index into m.accounts, its
-// already-styled label, and that label's rendered width.
-type tabEntry struct {
-	idx  int
-	text string
-	w    int
+// tabHit is the column span [x, x+w) of one visible account tab.
+type tabHit struct{ idx, x, w int }
+
+// syncSuffix is the "syncing…"/"synced 2m ago" text at the right end of the
+// tab bar, and tabBudget the columns left for the tabs themselves — shared by
+// renderList and tabHitTest so what is drawn and what is clickable can't drift.
+func (m Model) syncSuffix() string {
+	if m.syncing {
+		return "  " + m.sp.View() + styleSyncing.Render(" syncing…")
+	}
+	if !m.lastSynced.IsZero() {
+		return "  " + styleMeta.Render("synced "+humanize.TimeAgo(m.lastSynced))
+	}
+	return ""
 }
 
-// tabWindow picks which contiguous run of accounts fits in the tab bar
-// for the given width, always including the active tab — anchoring on
-// activeTab and growing left then right, rather than always starting
-// from account 0, is what makes the bar "scroll" as you tab through
-// accounts instead of just hard-truncating the tail and hiding whichever
-// accounts don't fit from index 0. Shared by renderList (drawing) and
-// tabHitTest (click mapping) so the two can't disagree about which tab is
-// at which column — exactly the kind of drift that caused the detail
-// view's width bug earlier this session.
-func (m Model) tabWindow(w int) (entries []tabEntry, hasLeft, hasRight bool) {
+func (m Model) tabBudget() int { return min(m.width, 130) - 4 - lipgloss.Width(m.syncSuffix()) }
+
+// tabBar draws the account tabs with ui.Tabs (active pill, others dimmed,
+// unread count after the name) and works out where each visible tab sits, by
+// finding its " label count " cell in the plain text — ui.Tabs only drops tabs
+// from the ends, so the visible ones are contiguous around the active tab.
+func (m Model) tabBar(w int) (string, []tabHit) {
 	if len(m.accounts) == 0 {
-		return nil, false, false
+		return "", nil
 	}
-	widths := make([]int, len(m.accounts))
-	rendered := make([]string, len(m.accounts))
-	for i, a := range m.accounts {
-		acctKey := a
+	counts := make([]int, len(m.accounts))
+	for i := range m.accounts {
+		key := m.accounts[i]
 		if i == 0 {
-			acctKey = ""
+			key = ""
 		}
-		label := a
-		if c := m.unreadCounts[acctKey]; c > 0 {
-			label = fmt.Sprintf("%s ·%d", a, c)
-		}
-		if i == m.activeTab {
-			rendered[i] = styleTabActive.Render(label)
-		} else {
-			rendered[i] = styleTabInact.Render(label)
-		}
-		widths[i] = lipgloss.Width(rendered[i])
+		counts[i] = m.unreadCounts[key]
 	}
+	bar := ui.Tabs(w, m.accounts, m.activeTab, counts)
+	plain := ansi.Strip(bar)
+	seg := func(i int) string {
+		if counts[i] > 0 {
+			return fmt.Sprintf(" %s %d ", m.accounts[i], counts[i])
+		}
+		return " " + m.accounts[i] + " "
+	}
+	col := func(byteIdx int) int { return runewidth.StringWidth(plain[:byteIdx]) }
 
-	const sep = 2
-	start := m.activeTab
-	width := widths[m.activeTab]
-	for start > 0 {
-		cand := width + sep + widths[start-1]
-		if cand > w {
+	at := strings.Index(plain, seg(m.activeTab))
+	if at < 0 {
+		return bar, nil
+	}
+	hits := []tabHit{{m.activeTab, col(at), runewidth.StringWidth(seg(m.activeTab))}}
+	for end, j := at+len(seg(m.activeTab)), m.activeTab+1; j < len(m.accounts); j++ { // right neighbours
+		sg := seg(j)
+		if !strings.HasPrefix(plain[end:], " "+sg) {
 			break
 		}
-		width = cand
-		start--
+		hits = append(hits, tabHit{j, col(end + 1), runewidth.StringWidth(sg)})
+		end += 1 + len(sg)
 	}
-	end := m.activeTab + 1
-	for end < len(m.accounts) {
-		cand := width + sep + widths[end]
-		if cand > w {
+	for start, j := at, m.activeTab-1; j >= 0; j-- { // left neighbours
+		sg := seg(j)
+		if !strings.HasSuffix(plain[:start], sg+" ") {
 			break
 		}
-		width = cand
-		end++
+		start -= 1 + len(sg)
+		hits = append(hits, tabHit{j, col(start), runewidth.StringWidth(sg)})
 	}
-
-	for i := start; i < end; i++ {
-		entries = append(entries, tabEntry{idx: i, text: rendered[i], w: widths[i]})
-	}
-	return entries, start > 0, end < len(m.accounts)
+	return bar, hits
 }
 
 // tabHitTest returns the account-tab index at column x on the tab bar row
@@ -265,20 +259,11 @@ func (m Model) tabHitTest(x, y int) int {
 	if y != 1 || len(m.accounts) == 0 {
 		return -1
 	}
-	w := min(m.width, 130) - 4
-	entries, hasLeft, _ := m.tabWindow(w)
-	col := 0
-	if hasLeft {
-		col += 2 // "‹ "
-	}
-	for i, e := range entries {
-		if i > 0 {
-			col += 2 // "  " join separator
+	_, hits := m.tabBar(m.tabBudget())
+	for _, h := range hits {
+		if x >= h.x && x < h.x+h.w {
+			return h.idx
 		}
-		if x >= col && x < col+e.w {
-			return e.idx
-		}
-		col += e.w
 	}
 	return -1
 }
@@ -333,8 +318,111 @@ func renderGroupHeader(group string, width int) string {
 	return styleDivider.Render("──" + label + dashes)
 }
 
+// rowState is how a list row is drawn: plain, under the mouse, or selected.
+type rowState int
+
+const (
+	rowNormal rowState = iota
+	rowHover
+	rowSelected
+)
+
+var styleSelectedText = lipgloss.NewStyle().Bold(true).Foreground(theme.SelectedFgV2)
+
+// paintRow puts a finished (possibly multi-colored) row line on one
+// continuous background: ui.Row's accent bar + selection background for the
+// selected row, the hover background for a hovered one, a plain 2-column
+// gutter otherwise. Inner colors survive — the old per-segment approach left
+// holes in the selection wherever a column had its own color.
+func paintRow(width int, state rowState, content string) string {
+	switch state {
+	case rowSelected:
+		return ui.Row(width, true, content)
+	case rowHover:
+		return paintBackground("  "+ansi.Truncate(content, max(width-2, 0), "…"), width, theme.HoverV2)
+	}
+	return ui.Row(width, false, content)
+}
+
+// paintBackground pads text to width and paints st's background behind it,
+// re-applying it after every reset inside text.
+func paintBackground(text string, width int, st lipgloss.Style) string {
+	probe := st.Render("\x00")
+	i := strings.Index(probe, "\x00")
+	if i < 0 {
+		return text
+	}
+	pre, post := probe[:i], probe[i+1:]
+	text += strings.Repeat(" ", max(width-lipgloss.Width(text), 0))
+	text = strings.ReplaceAll(text, "\x1b[0m", "\x1b[0m"+pre)
+	text = strings.ReplaceAll(text, "\x1b[m", "\x1b[m"+pre)
+	return pre + text + post
+}
+
+// prefix2 pads the checkbox prefix of a preview line to the same width.
+func prefix2(prefix string) string { return strings.Repeat(" ", lipgloss.Width(prefix)) }
+
+// weekdayGroup reports whether a date-group header is a bare weekday name
+// ("Monday") — dateGroup's label for 2–6 days ago.
+func weekdayGroup(group string) bool {
+	switch group {
+	case "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday":
+		return true
+	}
+	return false
+}
+
+// rowDate is the date text of a list row: only what the group header above it
+// doesn't already say. Under Today/Yesterday/a weekday that is just the time;
+// "Last week" adds the weekday, older groups the day and month.
+func rowDate(t time.Time, group string) string {
+	switch {
+	case group == "Today", group == "Yesterday", weekdayGroup(group):
+		return t.Format("15:04")
+	case group == "Last week":
+		return t.Format("Mon 15:04")
+	}
+	return t.Format("Jan 02 15:04")
+}
+
+// rowDateW is the (per-group, so columns stay aligned within a group) width
+// of rowDate's output.
+func rowDateW(group string) int {
+	switch {
+	case group == "Today", group == "Yesterday", weekdayGroup(group):
+		return 5
+	case group == "Last week":
+		return 9
+	}
+	return 12
+}
+
+const (
+	fromW = 20
+	acctW = 10 // "● " + 8-column short name
+)
+
+// rowIndent is the number of columns before the subject: gutter(2) + dot(1)
+// + space + date + 2 + from + 2 (+ account column).
+func rowIndent(msg *models.Message, showAcct bool) int {
+	n := 2 + 1 + 1 + rowDateW(dateGroup(msg.Date)) + 2 + fromW + 2
+	if showAcct && msg.Account != "" {
+		n += acctW + 2
+	}
+	return n
+}
+
+// acctStyle gives each account its own stable color (same palette as senders).
+func acctStyle(name string) lipgloss.Style {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(name))
+	return lipgloss.NewStyle().Foreground(senderPalette[int(h.Sum32())%len(senderPalette)])
+}
+
+// formatPreview is the body-preview line under a message: the first
+// non-quoted body line, indented to the subject column (minus the 2-column
+// gutter paintRow adds). "" when there is no body or no room.
 func formatPreview(msg *models.Message, width int, showAcct bool) string {
-	// find first non-empty, non-quoted body line
 	preview := ""
 	for _, line := range strings.Split(msg.Body, "\n") {
 		line = strings.TrimSpace(line)
@@ -346,87 +434,48 @@ func formatPreview(msg *models.Message, width int, showAcct bool) string {
 	if preview == "" {
 		return ""
 	}
-	// indent to align with subject column
-	indent := 1 + 2 + 14 + 2 + 20 + 2 // dot + date + from
-	if showAcct {
-		indent += 12 // badge + spaces
-	}
-	avail := width - indent
+	indent := rowIndent(msg, showAcct) - 2
+	avail := width - 2 - indent
 	if avail < 10 {
 		return ""
 	}
-	runes := []rune(preview)
-	if len(runes) > avail {
-		preview = string(runes[:avail-1]) + "…"
-	}
-	return strings.Repeat(" ", indent) + preview
+	return styleMeta.Render(strings.Repeat(" ", indent) + truncRunes(preview, avail))
 }
 
-// formatListRow builds a message list row. rowStyle carries the read/
-// unread/selected treatment (background+foreground+bold as appropriate)
-// and is applied directly to every plain segment (dot, spacing, subject) —
-// NOT via an outer Render() wrapping the whole composed string. That used
-// to be how this worked (buildListLines wrapped the return value in
-// styleRead/styleUnread/styleSelected.Render()), and it was broken:
-// dateStyled/fromStyled below carry their OWN independent colors, and
-// lipgloss's Render() ends every string with a full SGR reset — the FIRST
-// inner segment's reset silently clobbered the outer wrap's style for
-// everything after it. Confirmed empirically with a forced ANSI profile:
-// the subject text (and the selected row's background) lost its intended
-// styling entirely past the "from" column. Fixed by applying rowStyle
-// per-segment instead, which also makes it safe to highlight fuzzy matches
-// here even on the selected row (no outer wrap left to clobber).
-func formatListRow(msg *models.Message, width int, showAcct bool, rowStyle lipgloss.Style, query string) string {
-	dot := "○"
+// formatListRow builds a message list row exactly width columns wide:
+// gutter, read-dot, date, sender, account, subject. The segments carry their
+// own colors; the selected/hover background is laid over the finished line by
+// paintRow rather than applied per segment — a per-segment background left
+// holes between the independently colored date/sender/account columns, and an
+// outer wrap would be clobbered by their inner resets.
+func formatListRow(msg *models.Message, width int, showAcct bool, state rowState, query string) string {
+	base, dot := styleRead, "○"
 	if !msg.Read {
-		dot = "●"
+		base, dot = styleUnread, "●"
 	}
+	if state == rowSelected {
+		base = styleSelectedText
+	}
+	group := dateGroup(msg.Date)
+	dateStyled := coloredDate(padRunes(rowDate(msg.Date, group), rowDateW(group)), msg.Date)
 
-	// ── date column (14 chars, pad BEFORE styling) — independently
-	// colored by recency, unaffected by read/unread/selected state ──
-	dateRaw := smartDate(msg.Date)
-	datePadded := fmt.Sprintf("%-14s", dateRaw)
-	dateStyled := coloredDate(datePadded, msg.Date)
-
-	// ── from column (20 chars, pad BEFORE styling) — independently
-	// colored per sender, unaffected by read/unread/selected state ──
 	from := msg.From
 	if idx := strings.Index(from, "<"); idx > 0 {
 		from = strings.TrimSpace(from[:idx])
 	}
-	from = truncRunes(from, 20)
-	fromStyled := senderStyle(msg.From).Render(padRunes(from, 20))
+	fromStyled := senderStyle(msg.From).Render(padRunes(truncRunes(from, fromW), fromW))
 
-	// ── account badge (only in Alle tab, always 12 chars wide: [xxxxxxxx]·· ) ──
-	const badgeInner = 8                  // fixed visual width of text inside brackets
-	const badgeTotal = badgeInner + 2 + 2 // "[" + inner + "]" + "  "
-	acctBadge := ""
-	acctW := 0
+	acct := ""
 	if showAcct && msg.Account != "" {
-		inner := padRunes(runeLimit(acctShort(msg.Account), badgeInner), badgeInner)
-		acctBadge = styleAcctBadge.Render("["+inner+"]") + rowStyle.Render("  ")
-		acctW = badgeTotal
+		name := padRunes(runeLimit(acctShort(msg.Account), acctW-2), acctW-2)
+		acct = acctStyle(msg.Account).Render("● ") + styleMeta.Render(name) + "  "
 	}
 
-	// ── subject: fill remaining width, fuzzy-highlighted ──
-	// dot(1) + 2 + date(14) + 2 + from(20) + 2 + acctW + subject
-	fixed := 1 + 2 + 14 + 2 + 20 + 2 + acctW
-	subjectW := width - fixed
-	if subjectW < 10 {
-		subjectW = 10
-	}
-	matchIdx := fuzzyMatchIndexes(query, msg.Subject)
-	subject := highlightMatches(truncRunes(msg.Subject, subjectW), matchIdx, rowStyle)
+	subjectW := max(width-rowIndent(msg, showAcct), 10)
+	subject := highlightMatches(truncRunes(msg.Subject, subjectW), fuzzyMatchIndexes(query, msg.Subject), base)
 
-	row := rowStyle.Render(dot) + rowStyle.Render("  ") + dateStyled + rowStyle.Render("  ") +
-		fromStyled + rowStyle.Render("  ") + acctBadge + subject
-
-	// Pad to full width with rowStyle so a selected row's background spans
-	// the whole line, not just up to the last character of content.
-	if pad := width - lipgloss.Width(row); pad > 0 {
-		row += rowStyle.Render(strings.Repeat(" ", pad))
-	}
-	return row
+	content := base.Render(dot) + " " + dateStyled + "  " + fromStyled + "  " + acct + subject
+	return paintRow(width, state, content)
 }
 
 // stripVariationSelectors removes characters whose display width is
