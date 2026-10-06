@@ -3,6 +3,7 @@ package mcpserver
 import (
 	"context"
 	"fmt"
+	"github.com/aeon022/mailctl/internal/actlog"
 	"strings"
 
 	"github.com/aeon022/mailctl/internal/config"
@@ -147,11 +148,15 @@ func handleThread(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResu
 	return mcp.NewToolResultText(formatMessages(msgs, fmt.Sprintf("Thread: %q", subject))), nil
 }
 
+// sendMail is a variable so tests never reach a mail client or SMTP server.
+var sendMail = mail.Send
+
 func handleSend(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	d := draftFromRequest(req)
-	if err := mail.Send(d); err != nil {
+	if err := sendMail(d); err != nil {
 		return mcp.NewToolResultError("send failed: " + err.Error()), nil
 	}
+	actlog.Sent(d.Subject)
 	return mcp.NewToolResultText(fmt.Sprintf("Sent: %q → %s", d.Subject, strings.Join(d.To, ", "))), nil
 }
 

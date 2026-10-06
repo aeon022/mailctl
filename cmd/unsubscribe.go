@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/aeon022/mailctl/internal/actlog"
 	"io"
 	"os"
 	"strings"
@@ -103,6 +104,7 @@ func unsubscribeFlow(out io.Writer, in io.Reader, interactive bool, msg models.M
 	if err := a.do(target); err != nil {
 		return err
 	}
+	actlog.Unsubscribed(msg.From)
 	if target.Kind == unsub.OneClick {
 		fmt.Fprintln(out, "✓ Unsubscribe request accepted.")
 	} else {

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"github.com/aeon022/mailctl/internal/actlog"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -103,12 +104,16 @@ func markReadCmd(id string) tea.Cmd {
 	}
 }
 
+// sendMail is a variable so tests never reach a mail client or SMTP server.
+var sendMail = mail.Send
+
 func sendCmd(to, subject, body string, attachments []string) tea.Cmd {
 	return func() tea.Msg {
 		d := &models.Draft{To: []string{to}, Subject: subject, Body: body, Attachments: attachments}
-		if err := mail.Send(d); err != nil {
+		if err := sendMail(d); err != nil {
 			return sentMsg{err}
 		}
+		actlog.Sent(subject)
 		return sentMsg{}
 	}
 }

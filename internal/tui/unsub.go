@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"github.com/aeon022/mailctl/internal/actlog"
 	"strings"
 	"time"
 
@@ -64,8 +65,14 @@ func findUnsubCmd(msg models.Message) tea.Cmd {
 	}
 }
 
-func doUnsubCmd(t unsub.Target) tea.Cmd {
-	return func() tea.Msg { return unsubDoneMsg{err: performUnsub(t), via: string(t.Kind)} }
+func doUnsubCmd(t unsub.Target, sender string) tea.Cmd {
+	return func() tea.Msg {
+		err := performUnsub(t)
+		if err == nil {
+			actlog.Unsubscribed(sender)
+		}
+		return unsubDoneMsg{err: err, via: string(t.Kind)}
+	}
 }
 
 // handleUnsubKey runs while the confirm popup is open; every other key is
@@ -85,7 +92,7 @@ func (m Model) handleUnsubKey(key string) (Model, tea.Cmd) {
 			return m, nil
 		}
 		m.setStatus("Unsubscribing…")
-		return m, doUnsubCmd(p.target)
+		return m, doUnsubCmd(p.target, p.sender)
 	case "esc", "n", "q":
 		m.unsubPrompt = nil
 		m.setStatus("Unsubscribe cancelled")

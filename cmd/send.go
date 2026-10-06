@@ -2,11 +2,15 @@ package cmd
 
 import (
 	"fmt"
+	"github.com/aeon022/mailctl/internal/actlog"
 
 	"github.com/aeon022/mailctl/internal/mail"
 	"github.com/aeon022/mailctl/internal/markdown"
 	"github.com/spf13/cobra"
 )
+
+// sendMail is a variable so tests never reach a mail client or SMTP server.
+var sendMail = mail.Send
 
 var sendCmd = &cobra.Command{
 	Use:     "send <draft.md>",
@@ -18,9 +22,10 @@ var sendCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		if err := mail.Send(draft); err != nil {
+		if err := sendMail(draft); err != nil {
 			return fmt.Errorf("send: %w", err)
 		}
+		actlog.Sent(draft.Subject)
 		if isJSON() {
 			outputJSON(map[string]any{
 				"status":  "sent",
