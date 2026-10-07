@@ -13,7 +13,6 @@ import (
 	"github.com/aeon022/missionctl-core/humanize"
 	"github.com/aeon022/missionctl-core/theme"
 	"github.com/aeon022/missionctl-core/ui"
-	"github.com/charmbracelet/x/ansi"
 	runewidth "github.com/mattn/go-runewidth"
 	"github.com/sahilm/fuzzy"
 )
@@ -310,9 +309,7 @@ func (m Model) tabBudget() int { return m.bodyW() - tabMargin - 1 }
 
 // tabBar draws the Accounts row — dim label (spacious tier), then ui.Tabs
 // (active pill, others dimmed, unread count after the name) — within w
-// columns and works out where each visible tab sits, by finding its
-// " label count " cell in the plain text. ui.Tabs only drops tabs from the
-// ends, so the visible ones are contiguous around the active tab.
+// columns; the click spans come straight from ui.TabsLayout.
 func (m Model) tabBar(w int) (string, []tabHit) {
 	if len(m.accounts) == 0 {
 		return "", nil
@@ -330,36 +327,10 @@ func (m Model) tabBar(w int) (string, []tabHit) {
 		}
 		counts[i] = m.unreadCounts[key]
 	}
-	bar := ui.Tabs(max(w-lw, 1), m.accounts, m.activeTab, counts)
-	plain := ansi.Strip(bar)
-	seg := func(i int) string {
-		if counts[i] > 0 {
-			return fmt.Sprintf(" %s %d ", m.accounts[i], counts[i])
-		}
-		return " " + m.accounts[i] + " "
-	}
-	col := func(byteIdx int) int { return lw + runewidth.StringWidth(plain[:byteIdx]) }
-
-	at := strings.Index(plain, seg(m.activeTab))
-	if at < 0 {
-		return label + bar, nil
-	}
-	hits := []tabHit{{m.activeTab, col(at), runewidth.StringWidth(seg(m.activeTab))}}
-	for end, j := at+len(seg(m.activeTab)), m.activeTab+1; j < len(m.accounts); j++ { // right neighbours
-		sg := seg(j)
-		if !strings.HasPrefix(plain[end:], " "+sg) {
-			break
-		}
-		hits = append(hits, tabHit{j, col(end + 1), runewidth.StringWidth(sg)})
-		end += 1 + len(sg)
-	}
-	for start, j := at, m.activeTab-1; j >= 0; j-- { // left neighbours
-		sg := seg(j)
-		if !strings.HasSuffix(plain[:start], sg+" ") {
-			break
-		}
-		start -= 1 + len(sg)
-		hits = append(hits, tabHit{j, col(start), runewidth.StringWidth(sg)})
+	bar, spans := ui.TabsLayout(max(w-lw, 1), m.accounts, m.activeTab, counts)
+	hits := make([]tabHit, len(spans))
+	for i, sp := range spans {
+		hits[i] = tabHit{sp.Index, lw + sp.X0, sp.X1 - sp.X0}
 	}
 	return label + bar, hits
 }
@@ -445,24 +416,9 @@ func paintRow(width int, state rowState, content string) string {
 	case rowSelected:
 		return ui.Row(width, true, content)
 	case rowHover:
-		return paintBackground("  "+ansi.Truncate(content, max(width-2, 0), "…"), width, theme.HoverV2)
+		return ui.HoverRow(width, content)
 	}
 	return ui.Row(width, false, content)
-}
-
-// paintBackground pads text to width and paints st's background behind it,
-// re-applying it after every reset inside text.
-func paintBackground(text string, width int, st lipgloss.Style) string {
-	probe := st.Render("\x00")
-	i := strings.Index(probe, "\x00")
-	if i < 0 {
-		return text
-	}
-	pre, post := probe[:i], probe[i+1:]
-	text += strings.Repeat(" ", max(width-lipgloss.Width(text), 0))
-	text = strings.ReplaceAll(text, "\x1b[0m", "\x1b[0m"+pre)
-	text = strings.ReplaceAll(text, "\x1b[m", "\x1b[m"+pre)
-	return pre + text + post
 }
 
 // prefix2 pads the checkbox prefix of a preview line to the same width.
