@@ -11,8 +11,10 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/aeon022/mailctl/internal/models"
 	"github.com/aeon022/missionctl-core/humanize"
+	"github.com/aeon022/missionctl-core/statusbar"
 	"github.com/aeon022/missionctl-core/theme"
 	"github.com/aeon022/missionctl-core/ui"
+	"github.com/charmbracelet/x/ansi"
 	runewidth "github.com/mattn/go-runewidth"
 	"github.com/sahilm/fuzzy"
 )
@@ -92,9 +94,9 @@ func (m *Model) setStatus(s string) {
 // press since that persisted Height, not renderDetail's per-render-only
 // copy, is what viewport.Update() actually scrolls by).
 func (m Model) detailBodyHeight() int {
-	// subject(1) + from(1) + to(1) + date(1) + account(1) + divider(1)
-	// + gap-before-footer(1) + footer-divider(1) + help(1) = 9
-	h := m.height - detailPadV*2 - 9
+	// header chrome + subject/from/to/date/account(5) + divider(1)
+	// + status line(1) + 2-line footer(2)
+	h := m.height - m.chromeLines() - 9
 	if h < 5 {
 		h = 5
 	}
@@ -823,4 +825,38 @@ func openURLCmd(url string) tea.Cmd {
 		_ = exec.Command("open", url).Start()
 		return nil
 	}
+}
+
+// chromeLines is the height of the header block every secondary view shares:
+// header + divider (+ a blank line in the tall tier, like the main view).
+func (m Model) chromeLines() int {
+	if m.spacious() {
+		return 3
+	}
+	return 2
+}
+
+// composeBodyHeight is the compose textarea height: what is left under the
+// chrome, the To/Subject/Attach/blank/Body-label rows and the 2-line footer.
+func (m Model) composeBodyHeight() int { return max(3, m.height-m.chromeLines()-7) }
+
+// secondary frames a non-list view with the shared chrome — "mailctl · name"
+// header (ctx in the middle, date right), divider, the body and a one-line
+// hint footer (an error replaces the hints; right is flush right) — padded to
+// exactly m.height lines. Over-long body lines are cut so none can wrap.
+func (m Model) secondary(name, ctx, body, right string, hints ...[2]string) string {
+	w := m.width - 1
+	lines := []string{
+		" " + ui.Header(w, styleHeader.Render("mailctl · "+name), styleMeta.Render(ctx), styleMeta.Render(time.Now().Format("Mon 02 Jan"))),
+		styleDivider.Render(strings.Repeat("─", m.width)),
+	}
+	if m.spacious() {
+		lines = append(lines, "")
+	}
+	bar := statusbar.Line(w, statusbar.Hints(w-lipgloss.Width(right)-2, hints...), right)
+	bl := strings.Split(body, "\n")
+	for i, l := range bl {
+		bl[i] = ansi.Truncate(l, m.width, "…")
+	}
+	return ui.Frame(m.height, strings.Join(lines, "\n"), strings.Join(bl, "\n"), "\n "+bar)
 }

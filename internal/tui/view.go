@@ -40,7 +40,7 @@ func (m Model) viewContent() string {
 		return m.renderDetail()
 	case viewCompose:
 		if m.templatePicking {
-			return overlay.Center(m.renderCompose(), m.renderTemplatePicker(), m.width, m.height, 0)
+			return overlay.CenterDim(m.renderCompose(), m.renderTemplatePicker(), m.width, m.height, 0)
 		}
 		return m.renderCompose()
 	case viewHelp:
@@ -90,7 +90,7 @@ func (m Model) openHelp() Model {
 		popW = 40
 	}
 
-	vp := viewport.New(viewport.WithWidth(popW-6), viewport.WithHeight(popH-5)) // border 1+1, padding(1,2) → 2 rows/4 cols; -1 row for footer
+	vp := viewport.New(viewport.WithWidth(popW-4), viewport.WithHeight(popH-3)) // ui.Panel border → 2 rows/cols, 1-col side margin, -1 row for footer
 	vp.SetContent(m.helpContent())
 
 	m.helpVP = vp
@@ -108,13 +108,11 @@ func (m Model) renderHelpPopup() string {
 	if m.helpVP.TotalLineCount() > m.helpVP.Height() {
 		footer = fmt.Sprintf("j/k scroll (%d%%)  ·  %s", int(m.helpVP.ScrollPercent()*100), footer)
 	}
-	body := m.helpVP.View() + "\n" + styleMeta.Render(footer)
-	return lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(colorBlue).
-		Padding(1, 2).
-		Width(m.helpPopW).
-		Render(body)
+	lines := append(strings.Split(m.helpVP.View(), "\n"), styleMeta.Render(footer))
+	for i := range lines {
+		lines[i] = " " + lines[i]
+	}
+	return ui.Panel(m.helpPopW, m.helpPopH, "Help", strings.Join(lines, "\n"), true)
 }
 
 // headerLine is the title bar: tool name, "<account scope> · N unread" in the
@@ -312,12 +310,12 @@ func (m Model) renderPreview(w, h int) string {
 	return strings.Join(out, "\n")
 }
 
-// detailPadV/detailPadH inset the opened-mail view from the terminal edges
+// detailPadH insets the opened-mail view from the terminal edges
 // — it previously rendered flush against row/column 0. Shrinking the
 // model's effective width/height first (rather than padding the finished
 // string) means every width calc below — dividers, the viewport, the
 // scrollbar — already accounts for the smaller canvas.
-const detailPadV, detailPadH = 1, 2
+const detailPadH = 2
 
 // doubleClickWindow opens the message detail on a second click within this
 // window, same pattern and duration taskctl uses for its own double-click.
@@ -351,6 +349,7 @@ func (m Model) renderDetail() string {
 	if m.detail == nil {
 		return ""
 	}
+	full := m.width
 	m.width = m.detailRawWidth()
 	w := min(m.width, 130)
 	var b strings.Builder
@@ -372,20 +371,24 @@ func (m Model) renderDetail() string {
 	m.vp.SetHeight(m.detailBodyHeight())
 	b.WriteString(renderScrollbar(m.vp))
 
-	// ── footer ──
-	b.WriteString("\n\n" + styleDivider.Render(strings.Repeat("─", w)) + "\n")
-	hints := [][2]string{{"esc", "back"}, {"r", "reply"}, {"q", "quit"}, {"a", "ai draft"}, {"u", "unread"},
-		{"d", "delete"}, {"y", "copy"}, {"o", "mail"}, {"↑↓/jk", "scroll"}}
-	hints = append(hints, [2]string{"U", "unsubscribe"})
-	b.WriteString(statusbar.Hints(w, hints...))
+	// ── status line (under the body, above the footer) ──
 	if m.aiDrafting {
-		b.WriteString("\n  " + m.sp.View() + styleSyncing.Render(" Drafting a reply…"))
+		b.WriteString("\n" + m.sp.View() + styleSyncing.Render(" Drafting a reply…"))
 	} else if m.err != nil {
-		b.WriteString("\n  " + styleErr.Render("✗ "+m.err.Error()))
+		b.WriteString("\n" + styleErr.Render("✗ "+m.err.Error()))
 	} else if m.status != "" {
-		b.WriteString("\n  " + styleOK.Render("✓ "+m.status))
+		b.WriteString("\n" + styleOK.Render("✓ "+m.status))
 	}
-	return lipgloss.NewStyle().Padding(detailPadV, detailPadH).Render(b.String())
+
+	pad := strings.Repeat(" ", detailPadH)
+	lines := strings.Split(b.String(), "\n")
+	for i := range lines {
+		lines[i] = pad + lines[i]
+	}
+	m.width = full
+	return m.secondary("Message", m.detail.Account, strings.Join(lines, "\n"), "",
+		[2]string{"esc", "back"}, [2]string{"r", "reply"}, [2]string{"q", "quit"}, [2]string{"a", "ai draft"}, [2]string{"u", "unread"},
+		[2]string{"d", "delete"}, [2]string{"y", "copy"}, [2]string{"o", "mail"}, [2]string{"↑↓/jk", "scroll"}, [2]string{"U", "unsubscribe"})
 }
 
 // renderScrollbar renders viewport content with a sidebar scrollbar track.
@@ -438,14 +441,11 @@ func renderScrollbar(vp viewport.Model) string {
 }
 
 func (m Model) renderCompose() string {
-	title := "New Message"
+	name, ctx := "New Message", ""
 	if m.replyTo != nil {
-		title = "Reply"
+		name, ctx = "Reply", m.replyTo.Subject
 	}
-	w := min(m.width, 130)
 	var b strings.Builder
-	b.WriteString(styleHeader.Render("mailctl") + "  " + styleMeta.Render(title) + "\n")
-	b.WriteString(styleDivider.Render(strings.Repeat("─", w)) + "\n\n")
 
 	focused := func(i int) string {
 		if m.composeFocus == i {
@@ -458,37 +458,30 @@ func (m Model) renderCompose() string {
 	b.WriteString(focused(focusSubject) + " " + styleLabel.Render("Subject:") + "  " + m.subjectInput.View() + "\n")
 	b.WriteString(focused(focusAttach) + " " + styleLabel.Render("Attach:") + "   " + m.attachInput.View() + "\n\n")
 	b.WriteString(focused(focusBody) + " " + styleLabel.Render("Body:") + "\n")
-	b.WriteString(m.bodyArea.View() + "\n\n")
-
-	if m.err != nil {
-		b.WriteString(styleErr.Render("✗ "+m.err.Error()) + "\n")
-	} else {
-		b.WriteString(styleHelp.Render("tab:next  ctrl+s:send  ctrl+d:draft  ctrl+t:template  esc:cancel  attach:comma-sep paths"))
-	}
-	return b.String()
+	b.WriteString(m.bodyArea.View())
+	return m.secondary(name, ctx, b.String(), "",
+		[2]string{"esc", "cancel"}, [2]string{"ctrl+s", "send"}, [2]string{"tab", "next"}, [2]string{"ctrl+d", "draft"}, [2]string{"ctrl+t", "template"})
 }
 
 // renderTemplatePicker overlays a simple j/k list of saved templates on top
 // of the compose view — same overlay.Center + rounded-border pattern
 // renderHelpPopup uses.
 func (m Model) renderTemplatePicker() string {
-	var b strings.Builder
-	b.WriteString(styleHeader.Render("Insert template") + "\n\n")
+	w := min(50, m.width-4)
+	var rows []string
 	if len(m.templateNames) == 0 {
-		b.WriteString(styleMeta.Render("No templates yet — `mailctl template new <name>`") + "\n")
+		rows = append(rows, styleMeta.Render("No templates yet — `mailctl template new <name>`"))
 	}
 	for i, n := range m.templateNames {
 		if i == m.templateCursor {
-			b.WriteString(styleTabActive.Render("› "+n) + "\n")
+			rows = append(rows, styleTabActive.Render("› "+n))
 		} else {
-			b.WriteString("  " + n + "\n")
+			rows = append(rows, "  "+n)
 		}
 	}
-	b.WriteString("\n" + styleMeta.Render("j/k move  enter insert  esc cancel"))
-	return lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(colorBlue).
-		Padding(1, 2).
-		Width(min(50, m.width-4)).
-		Render(b.String())
+	rows = append(rows, "", statusbar.Hints(w-4, [2]string{"esc", "cancel"}, [2]string{"j/k", "move"}, [2]string{"enter", "insert"}))
+	for i := range rows {
+		rows[i] = " " + rows[i]
+	}
+	return ui.Panel(w, min(len(rows)+2, max(m.height-4, 5)), "Insert template", strings.Join(rows, "\n"), true)
 }

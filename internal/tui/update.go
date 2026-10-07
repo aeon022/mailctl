@@ -61,7 +61,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// on screen or scrolling overshoots what the viewport shows per page.
 		m.vp = viewport.New(viewport.WithWidth(m.detailRawWidth()-2), viewport.WithHeight(m.detailBodyHeight()))
 		m.bodyArea.SetWidth(msg.Width - 12)
-		m.bodyArea.SetHeight(m.height - 12)
+		m.bodyArea.SetHeight(m.composeBodyHeight())
 
 	case tea.FocusMsg:
 		// Back in the window: refresh the list from the local DB (not a

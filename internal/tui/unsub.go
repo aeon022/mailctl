@@ -12,6 +12,8 @@ import (
 	"github.com/aeon022/mailctl/internal/models"
 	"github.com/aeon022/mailctl/internal/unsub"
 	"github.com/aeon022/missionctl-core/statusbar"
+	"github.com/aeon022/missionctl-core/ui"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // Unsubscribe flow: "U" in the detail view looks up the message's own
@@ -102,13 +104,19 @@ func (m Model) handleUnsubKey(key string) (Model, tea.Cmd) {
 
 func (m Model) renderUnsubPopup() string {
 	p := m.unsubPrompt
+	w := min(62, m.width-2)
 	var b strings.Builder
 	b.WriteString("Unsubscribe from\n")
 	b.WriteString(lipgloss.NewStyle().Bold(true).Render(p.sender) + "\n\n")
 	b.WriteString("Method: " + p.target.Describe() + "\n")
 	if p.fromBody {
-		b.WriteString("\nNo List-Unsubscribe header — this link was guessed\nfrom the message text. Check the page before you\nconfirm anything there.\n")
+		b.WriteString("\nNo List-Unsubscribe header — this link was guessed from the message text. Check the page before you confirm anything there.\n")
 	}
 	b.WriteString("\n" + statusbar.Hint("enter", "confirm") + "   " + statusbar.Hint("esc", "cancel"))
-	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colorAmber).Padding(1, 2).Render(b.String())
+	// wrap (never truncate: the user must see the whole target they confirm)
+	rows := strings.Split(ansi.Wrap(b.String(), max(w-5, 8), ""), "\n")
+	for i := range rows {
+		rows[i] = " " + rows[i]
+	}
+	return ui.Panel(w, len(rows)+2, "Unsubscribe", strings.Join(rows, "\n"), true)
 }
