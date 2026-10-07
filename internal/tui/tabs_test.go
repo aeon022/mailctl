@@ -3,6 +3,7 @@ package tui
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"charm.land/lipgloss/v2"
 	"github.com/aeon022/missionctl-core/tuitest"
@@ -48,12 +49,12 @@ func TestTabHitTestMatchesDrawnPositions(t *testing.T) {
 			if !strings.HasPrefix(label, m.accounts[h.idx]) {
 				t.Errorf("w=%d active=%d: hit span of tab %d reads %q, want it to start with %q", tc.width, tc.active, h.idx, label, m.accounts[h.idx])
 			}
-			// clicking the middle of the span resolves to that tab, on row 1 only
-			if got := m.tabHitTest(h.x+h.w/2, 1); got != h.idx {
+			// clicking the middle of the span resolves to that tab, on the tab row only
+			if got := m.tabHitTest(tabMargin+h.x+h.w/2, m.chrome().tabsY); got != h.idx {
 				t.Errorf("w=%d active=%d: click on tab %d resolved to %d", tc.width, tc.active, h.idx, got)
 			}
-			if got := m.tabHitTest(h.x+h.w/2, 2); got != -1 {
-				t.Errorf("row 2 is not the tab bar, got %d", got)
+			if got := m.tabHitTest(tabMargin+h.x+h.w/2, m.chrome().tabsY+1); got != -1 {
+				t.Errorf("the row below the tab bar is not the tab bar, got %d", got)
 			}
 			found = found || h.idx == tc.active
 		}
@@ -72,25 +73,28 @@ func TestClickingATabSwitchesAccount(t *testing.T) {
 			target = h
 		}
 	}
-	mi, cmd := tuitest.Send(m, tuitest.Click(target.x+1, 1))
+	mi, cmd := tuitest.Send(m, tuitest.Click(tabMargin+target.x+1, m.chrome().tabsY))
 	got := mi.(Model)
 	if got.activeTab != 2 || got.activeAccount() != "FH Burgenland" || len(cmd) == 0 {
 		t.Errorf("click on the third tab: tab=%d account=%q cmds=%d", got.activeTab, got.activeAccount(), len(cmd))
 	}
 }
 
-func TestSyncedSuffixDoesNotDriftTheHitTest(t *testing.T) {
-	// the sync text takes room from the tabs; draw and click must agree on it
+func TestSyncStatusLivesInTheFooterNotTheTabRow(t *testing.T) {
 	m := tabModel(t, 70, 4)
-	m.syncing = true
+	m.lastSynced = time.Now().Add(-time.Hour)
 	bar, hits := m.tabBar(m.tabBudget())
+	if strings.Contains(ansi.Strip(bar), "synced") {
+		t.Errorf("the tab row must not carry the sync text any more: %q", ansi.Strip(bar))
+	}
 	for _, h := range hits {
-		if h.x+h.w > lipgloss.Width(bar) {
-			t.Errorf("hit span %+v extends past the drawn bar (%d)", h, lipgloss.Width(bar))
+		if tabMargin+h.x+h.w > m.bodyW() {
+			t.Errorf("hit span %+v extends past the row (%d)", h, m.bodyW())
 		}
 	}
-	if lipgloss.Width(bar)+lipgloss.Width(m.syncSuffix()) > min(m.width, 130) {
-		t.Errorf("tabs + sync text overflow: %d + %d", lipgloss.Width(bar), lipgloss.Width(m.syncSuffix()))
+	lines := strings.Split(ansi.Strip(m.renderList()), "\n")
+	if footer := lines[len(lines)-1]; !strings.Contains(footer, "synced 1h ago") {
+		t.Errorf("footer must show the sync age, got %q", footer)
 	}
 }
 

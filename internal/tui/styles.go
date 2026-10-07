@@ -60,7 +60,6 @@ var (
 	// list
 	styleDivider  = lipgloss.NewStyle().Foreground(colorSubtle)
 	styleUnread   = lipgloss.NewStyle().Bold(true)
-	styleRead     = lipgloss.NewStyle().Foreground(colorMuted)
 	styleSelected = lipgloss.NewStyle().
 			Background(theme.SelectedBgV2).
 			Foreground(theme.SelectedFgV2).
@@ -73,14 +72,10 @@ var (
 	styleLabel   = lipgloss.NewStyle().Foreground(colorBlue).Width(9)
 
 	// status
-	styleHelp      = lipgloss.NewStyle().Foreground(colorMuted)
-	styleErr       = lipgloss.NewStyle().Foreground(colorRed)
-	styleOK        = lipgloss.NewStyle().Foreground(colorGreen)
-	styleSyncing   = lipgloss.NewStyle().Foreground(adaptiveColor("214", "220"))
-	styleToday     = lipgloss.NewStyle().Foreground(adaptiveColor("214", "220")).Bold(true)
-	styleDateWeek  = lipgloss.NewStyle().Foreground(colorMuted)
-	styleDateMonth = lipgloss.NewStyle().Foreground(adaptiveColor("247", "242"))
-	styleDateOld   = lipgloss.NewStyle().Foreground(colorSubtle)
+	styleHelp    = lipgloss.NewStyle().Foreground(colorMuted)
+	styleErr     = lipgloss.NewStyle().Foreground(colorRed)
+	styleOK      = lipgloss.NewStyle().Foreground(colorGreen)
+	styleSyncing = lipgloss.NewStyle().Foreground(adaptiveColor("214", "220"))
 )
 
 // senderPalette: 8 distinct colors, avoid red/green (used for status).

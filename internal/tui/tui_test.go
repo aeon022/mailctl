@@ -299,7 +299,7 @@ func TestFormatListRow_SelectedIsOneContinuousBar(t *testing.T) {
 	// between the date, sender, account and subject columns (each has its own
 	// color). Now the whole line sits on ONE background: full width, accent
 	// bar first, and after every inner reset the background is painted again.
-	msg := models.Message{Subject: "hi", From: "Alice <a@example.com>", Account: "Brücke", Date: time.Now(), Read: true}
+	msg := models.Message{Subject: "hi", From: "Alice <a@example.com>", Account: "Brücke", Date: time.Now(), Read: false}
 	row := formatListRow(&msg, 70, true, rowSelected, "")
 	if lipgloss.Width(row) != 70 {
 		t.Errorf("expected the rendered row to be exactly 70 columns wide, got %d", lipgloss.Width(row))
@@ -328,7 +328,8 @@ func TestFormatListRow_SelectedIsOneContinuousBar(t *testing.T) {
 }
 
 func TestFormatListRow_HoverIsContinuousToo(t *testing.T) {
-	msg := models.Message{Subject: "hi", From: "Alice <a@example.com>", Date: time.Now(), Read: true}
+	// unread: the sender carries its own color, so there is an inner reset to paint over
+	msg := models.Message{Subject: "hi", From: "Alice <a@example.com>", Date: time.Now(), Read: false}
 	row := formatListRow(&msg, 60, false, rowHover, "")
 	if lipgloss.Width(row) != 60 || strings.Contains(ansi.Strip(row), "▌") {
 		t.Errorf("hover: width %d, plain %q (no accent bar expected)", lipgloss.Width(row), ansi.Strip(row))
@@ -370,14 +371,16 @@ func TestRowDate_OnlyWhatTheGroupHeaderDoesNotSay(t *testing.T) {
 	}
 }
 
-func TestFormatListRow_AccountTagIsADotNotBrackets(t *testing.T) {
-	msg := models.Message{Subject: "hi", From: "a@example.com", Account: "Gerwin || Die Brücke", Date: time.Now(), Read: true}
+func TestFormatListRow_AccountTagIsJustADot(t *testing.T) {
+	msg := models.Message{Subject: "hi", From: "a@example.com", Account: "Gerwin || Die Brücke", Date: time.Now(), Read: false}
 	row := ansi.Strip(formatListRow(&msg, 90, true, rowNormal, ""))
 	if strings.Contains(row, "[") || strings.Contains(row, "]") {
 		t.Errorf("no brackets around the account: %q", row)
 	}
-	if !strings.Contains(row, "● Brücke") {
-		t.Errorf("expected a dot and the short account name, got %q", row)
+	// calmer rows: the account is just its colored dot — the name moved to the
+	// Message preview panel
+	if strings.Contains(row, "Brücke") || strings.Count(row, "●") < 2 {
+		t.Errorf("expected the unread dot plus the account dot and no account name, got %q", row)
 	}
 	if lipgloss.Width(row) != 90 {
 		t.Errorf("width %d", lipgloss.Width(row))

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"github.com/charmbracelet/x/ansi"
 	"strings"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/aeon022/missionctl-core/overlay"
 	"github.com/aeon022/missionctl-core/palette"
 	"github.com/aeon022/missionctl-core/statusbar"
+	"github.com/aeon022/missionctl-core/ui"
 )
 
 // ── View ──────────────────────────────────────────────────────────────────────
@@ -115,29 +117,48 @@ func (m Model) renderHelpPopup() string {
 		Render(body)
 }
 
-func (m Model) renderList() string {
-	w := min(m.width, 130)
-	var b strings.Builder
-
-	// ── app header ──
-	appName := styleHeader.Render("mailctl")
-	dateStr := styleMeta.Render(time.Now().Format("Mon, 02 Jan 2006"))
-	pad := w - lipgloss.Width(appName) - lipgloss.Width(dateStr)
-	if pad < 1 {
-		pad = 1
+// headerLine is the title bar: tool name, "<account scope> · N unread" in the
+// middle (dropped first on a narrow terminal) and the date.
+func (m Model) headerLine(w int) string {
+	scope := "all accounts"
+	if m.activeTab > 0 && m.activeTab < len(m.accounts) {
+		scope = m.accounts[m.activeTab]
 	}
-	b.WriteString(appName + strings.Repeat(" ", pad) + dateStr + "\n")
+	mid := styleMeta.Render(fmt.Sprintf("%s · %d unread", scope, m.unreadCounts[m.activeAccount()]))
+	return ui.Header(w, styleHeader.Render("mailctl"), mid, styleMeta.Render(time.Now().Format("Mon 02 Jan")))
+}
 
-	// ── account tab bar ──
+// tabsRow is the Accounts row (with its margin); while there are no accounts
+// yet it carries the sync spinner, or stays blank, so the layout never shifts.
+func (m Model) tabsRow(w int) string {
 	if len(m.accounts) > 0 {
 		bar, _ := m.tabBar(m.tabBudget())
-		b.WriteString(lipgloss.NewStyle().MaxWidth(w).Render(bar+m.syncSuffix()) + "\n")
-	} else if m.syncing {
-		b.WriteString(m.sp.View() + styleSyncing.Render(" syncing…") + "\n")
-	} else {
-		b.WriteString("\n")
+		return lipgloss.NewStyle().MaxWidth(w).Render(strings.Repeat(" ", tabMargin) + bar)
 	}
-	b.WriteString(styleDivider.Render(strings.Repeat("─", w)) + "\n")
+	if m.syncing {
+		return strings.Repeat(" ", tabMargin) + m.sp.View() + styleSyncing.Render(" syncing…")
+	}
+	return ""
+}
+
+func (m Model) renderList() string {
+	g := m.geom()
+	w := m.bodyW()
+	var b strings.Builder
+
+	// ── header, then (spacious tier) divider and a blank line ──
+	b.WriteString(m.headerLine(w) + "\n")
+	if m.spacious() {
+		b.WriteString(styleDivider.Render(strings.Repeat("─", w)) + "\n\n")
+	}
+
+	// ── account tab bar ──
+	b.WriteString(m.tabsRow(w) + "\n")
+	if m.spacious() {
+		b.WriteString("\n")
+	} else {
+		b.WriteString(styleDivider.Render(strings.Repeat("─", w)) + "\n")
+	}
 
 	// ── filter chips ──
 	if m.unreadOnly || m.searchQ != "" {
@@ -155,7 +176,7 @@ func (m Model) renderList() string {
 	if m.selecting {
 		badge := styleSelected.Render(fmt.Sprintf("select: %d", len(m.selected)))
 		hint := styleMeta.Render("  space toggle  A all  r mark read  d delete  esc cancel")
-		b.WriteString(badge + hint + "\n")
+		b.WriteString(ansi.Truncate(badge+hint, m.width, "…") + "\n")
 	}
 
 	// ── search input ──
@@ -184,24 +205,19 @@ func (m Model) renderList() string {
 		b.WriteString("\n")
 	}
 
-	// ── message list ──
-	listH := m.height - m.listStartY() - 2 // statusbar
-	if listH < 1 {
-		listH = 1
-	}
-
+	// ── message list (wide: Inbox panel + Message preview panel) ──
 	preListLines := strings.Count(b.String(), "\n")
-	if m.loading {
-		b.WriteString(emptystate.Loading(w, listH, m.sp.View(), "Loading messages…") + "\n")
-	} else if len(m.msgs) == 0 {
-		b.WriteString(emptystate.Render(w, listH, "✉", "No messages", "press s to sync") + "\n")
-	} else {
-		lines, cursorLine := m.buildListLines(w)
-		start := 0
-		if cursorLine >= listH {
-			start = cursorLine - listH + 1
-		}
-		end := min(len(lines), start+listH)
+	switch {
+	case m.loading:
+		b.WriteString(emptystate.Loading(w, g.bodyH, m.sp.View(), "Loading messages…") + "\n")
+	case len(m.msgs) == 0:
+		b.WriteString(emptystate.Render(w, g.bodyH, "✉", "No messages", "press s to sync") + "\n")
+	case g.wide:
+		b.WriteString(m.renderWideBody(g) + "\n")
+	default:
+		lines, cursorLine := m.buildListLines(g.w)
+		start := scrollStart(cursorLine, g.rowsVisible)
+		end := min(len(lines), start+g.rowsVisible)
 		for _, l := range lines[start:end] {
 			b.WriteString(l + "\n")
 		}
@@ -209,14 +225,21 @@ func (m Model) renderList() string {
 	// Pin the status bar to the bottom of the screen instead of letting it
 	// glue itself right under a short list — pad the list block out to its
 	// full line budget, same pattern taskctl/notectl use.
-	for written := strings.Count(b.String(), "\n") - preListLines; written < listH; written++ {
+	for written := strings.Count(b.String(), "\n") - preListLines; written < g.bodyH; written++ {
 		b.WriteString("\n")
 	}
 
-	// ── status / help bar ──
-	countStr := ""
+	// ── footer: hints on the left; sync age and the cursor counter on the right ──
+	right := ""
 	if len(m.msgs) > 0 {
-		countStr = styleHelp.Render(fmt.Sprintf("%d/%d", m.cursor+1, len(m.msgs)))
+		right = styleHelp.Render(fmt.Sprintf("%d/%d", m.cursor+1, len(m.msgs)))
+	}
+	if sync := m.syncStatus(); sync != "" {
+		if right != "" {
+			right = sync + "  " + right
+		} else {
+			right = sync
+		}
 	}
 	var helpBar string
 	if m.err != nil {
@@ -224,16 +247,69 @@ func (m Model) renderList() string {
 	} else if m.status != "" {
 		helpBar = styleOK.Render("✓ " + m.status)
 	} else {
-		helpBar = statusbar.Hints(w-lipgloss.Width(countStr)-2,
+		helpBar = statusbar.Hints(w-lipgloss.Width(right)-2,
 			[2]string{"enter", "open"}, [2]string{"n", "new"}, [2]string{"s", "sync"}, [2]string{"?", "help"},
 			[2]string{"q", "quit"}, [2]string{"/", "search"}, [2]string{"u", "unread"}, [2]string{"d", "delete"},
 			[2]string{"y", "copy"}, [2]string{"o", "mail"}, [2]string{"tab", "acct"})
 	}
 	b.WriteString(styleDivider.Render(strings.Repeat("─", w)) + "\n")
-	// Line keeps the count flush right and truncates the left side (never the
-	// count, never past w) when a long error/status message leaves no room.
-	b.WriteString(statusbar.Line(w, helpBar, countStr))
+	// Line keeps the right side flush right and truncates the left side (never
+	// the right, never past w) when a long error/status message leaves no room.
+	b.WriteString(statusbar.Line(w, helpBar, right))
 	return b.String()
+}
+
+// renderWideBody draws the Inbox panel (the list, scrolled to the cursor) and
+// the Message panel (preview of the selected message) side by side.
+func (m Model) renderWideBody(g listGeom) string {
+	lines, cursorLine := m.buildListLines(g.w)
+	start := scrollStart(cursorLine, g.rowsVisible)
+	end := min(len(lines), start+g.rowsVisible)
+	left := ui.Panel(g.leftW, g.bodyH, "Inbox", strings.Join(lines[start:end], "\n"), true)
+	right := ui.Panel(g.rightW, g.bodyH, "Message", m.renderPreview(g.rightW-3, max(g.bodyH-2, 1)), false)
+	return lipgloss.JoinHorizontal(lipgloss.Top, left, " ", right)
+}
+
+// renderPreview is the Message panel: headers of the SELECTED message and,
+// when its body is already loaded, the start of it. It only reads the model —
+// moving the cursor never fetches anything (Apple Mail/network); an unloaded
+// body says to press enter.
+func (m Model) renderPreview(w, h int) string {
+	if m.cursor < 0 || m.cursor >= len(m.msgs) {
+		return ""
+	}
+	msg := &m.msgs[m.cursor]
+	row := func(label, value string) string {
+		return styleMeta.Render(fmt.Sprintf("%-8s", label)) + value
+	}
+	var out []string
+	out = append(out, row("From", msg.From))
+	if len(msg.To) > 0 {
+		out = append(out, row("To", strings.Join(msg.To, ", ")))
+	}
+	when := msg.Date.Format("Mon 02 Jan 15:04") + styleMeta.Render("  ·  "+ui.RelTime(msg.Date, time.Now()))
+	out = append(out, row("Date", when))
+	if msg.Account != "" {
+		out = append(out, row("Account", acctStyle(msg.Account).Render("● ")+msg.Account))
+	}
+	out = append(out, "")
+	subject := styleSubject.Render(msg.Subject)
+	if !msg.Read {
+		subject = ui.Pill("unread", ui.Info) + " " + subject
+	}
+	out = append(out, wrapByWidth(subject, w)...)
+	out = append(out, "")
+	if body := strings.TrimSpace(stripVariationSelectors(msg.Body)); body == "" {
+		out = append(out, styleMeta.Render("Press enter to open"))
+	} else {
+		for _, l := range strings.Split(body, "\n") {
+			out = append(out, wrapByWidth(strings.TrimRight(l, " \t\r"), w)...)
+		}
+	}
+	if len(out) > h {
+		out = append(out[:h-1], styleMeta.Render("…"))
+	}
+	return strings.Join(out, "\n")
 }
 
 // detailPadV/detailPadH inset the opened-mail view from the terminal edges

@@ -222,7 +222,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-		if i := m.rowHitTest(msg.Y); i >= 0 {
+		if i := m.rowHitTest(msg.X, msg.Y); i >= 0 {
 			now := time.Now()
 			if i == m.lastClickRow && now.Sub(m.lastClickAt) < doubleClickWindow {
 				m.cursor = i
@@ -246,7 +246,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.MouseMotionMsg:
 		if m.view == viewList {
-			m.hoverRow = m.rowHitTest(msg.Y)
+			m.hoverRow = m.rowHitTest(msg.X, msg.Y)
 		}
 		return m, nil
 
@@ -456,16 +456,9 @@ func (m Model) updateList(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// (buildListLinesWithMapping + the same start-line calc) so a
 		// digit lands on the same message a click at that position would.
 		n := int(msg.String()[0] - '0')
-		w := min(m.width, 130)
-		_, cursorLine, lineToMsg := m.buildListLinesWithMapping(w)
-		listH := m.height - m.listStartY() - 2
-		if listH < 1 {
-			listH = 1
-		}
-		start := 0
-		if cursorLine >= listH {
-			start = cursorLine - listH + 1
-		}
+		g := m.geom()
+		_, cursorLine, lineToMsg := m.buildListLinesWithMapping(g.w)
+		start := scrollStart(cursorLine, g.rowsVisible)
 		count := 0
 		for _, msgIdx := range lineToMsg[start:] {
 			if msgIdx < 0 {

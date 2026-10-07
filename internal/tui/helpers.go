@@ -126,6 +126,10 @@ func (m Model) buildListLinesWithMapping(w int) ([]string, int, []int) {
 		// date group header
 		group := dateGroup(msg.Date)
 		if group != lastGroup {
+			if len(lines) > 0 { // breathing room between day groups
+				lines = append(lines, "")
+				lineToMsg = append(lineToMsg, -1)
+			}
 			lines = append(lines, renderGroupHeader(group, w))
 			lineToMsg = append(lineToMsg, -1)
 			lastGroup = group
@@ -164,12 +168,107 @@ func (m Model) buildListLinesWithMapping(w int) ([]string, int, []int) {
 	return lines, cursorLine, lineToMsg
 }
 
+// ── Geometry ─────────────────────────────────────────────────────────────────
+//
+// Two height tiers, like notectl:
+//
+//	spacious (>= 30 terminal rows)     compact
+//	  header                             header
+//	  ──────────                         Accounts tabs (no label)
+//	  (blank)                            ──────────
+//	  Accounts  tabs
+//	  (blank)
+//
+// chrome() is the single source of truth for which screen row holds what, so
+// the renderer, listStartY, the hit tests and the tests can't drift apart.
+
+// spaciousMinHeight is compared against m.height, which is the terminal height
+// minus the one slack row (see WindowSizeMsg) — i.e. 30 real terminal rows.
+const spaciousMinHeight = 29
+
+func (m Model) spacious() bool { return m.height >= spaciousMinHeight }
+
+const (
+	// rowLabelW is the width of the dim "Accounts" row label (spacious tier
+	// only), tabMargin the columns left of the label/tabs — it lines the row
+	// up with the list gutter.
+	rowLabelW = 10
+	tabMargin = 2
+	// wideMinWidth is where the list gets an Inbox panel and a Message
+	// preview panel next to it; maxWideW caps how far they stretch.
+	wideMinWidth = 120
+	maxWideW     = 200
+)
+
+type chrome struct {
+	tabsY int // screen row of the Accounts tab bar
+	rows  int // lines above the optional chips/select/search/palette rows
+}
+
+func (m Model) chrome() chrome {
+	if m.spacious() {
+		return chrome{tabsY: 3, rows: 5} // header, divider, blank, tabs, blank
+	}
+	return chrome{tabsY: 1, rows: 3} // header, tabs, divider
+}
+
+func (m Model) rowLabelW() int {
+	if m.spacious() {
+		return rowLabelW
+	}
+	return 0
+}
+
+// bodyW is the width the header, dividers, footer and (narrow) list use.
+func (m Model) bodyW() int {
+	if m.width >= wideMinWidth {
+		return min(m.width, maxWideW)
+	}
+	return min(m.width, 130)
+}
+
+// listGeom says where the message rows are: the width a row is built for,
+// how many fit, and the screen row the first one starts on. In the wide
+// layout the rows sit inside an Inbox panel (one border column + one pad
+// column on the left, a border row on top), next to the Message panel.
+type listGeom struct {
+	wide          bool
+	bodyH         int // rows between the preamble and the footer
+	w             int // width each list row is built for
+	rowsVisible   int
+	rowY0         int // screen row of the first visible list line
+	leftW, rightW int // panel widths (wide only)
+}
+
+func (m Model) geom() listGeom {
+	start := m.listStartY()
+	bodyH := max(m.height-start-2, 1) // footer = divider + status line
+	if m.width < wideMinWidth {
+		return listGeom{bodyH: bodyH, w: min(m.width, 130), rowsVisible: bodyH, rowY0: start}
+	}
+	total := min(m.width, maxWideW)
+	leftW := min(max(total/2, 60), 90)
+	return listGeom{
+		wide: true, bodyH: bodyH, w: leftW - 3, rowsVisible: max(bodyH-2, 1), rowY0: start + 1,
+		leftW: leftW, rightW: total - leftW - 1,
+	}
+}
+
+// scrollStart is the first visible list line: the window follows the cursor
+// once it would scroll past the bottom.
+func scrollStart(cursorLine, rowsVisible int) int {
+	if cursorLine >= rowsVisible {
+		return cursorLine - rowsVisible + 1
+	}
+	return 0
+}
+
 // listStartY returns the number of preamble lines above the message list —
-// header, tab bar, divider, optional filter chips, optional search input —
-// shared by renderList (to size the list) and rowHitTest (to locate it) so
-// the two can't drift apart.
+// header, tab bar, optional filter chips, optional search input — shared by
+// renderList (to size the list) and rowHitTest (to locate it) so the two
+// can't drift apart.
 func (m Model) listStartY() int {
-	y := 3 // header + tab bar + divider
+	y := m.chrome().rows
 	if m.unreadOnly || m.searchQ != "" {
 		y++
 	}
@@ -185,31 +284,43 @@ func (m Model) listStartY() int {
 	return y
 }
 
-// tabHit is the column span [x, x+w) of one visible account tab.
+// tabHit is the column span [x, x+w) of one visible account tab, relative to
+// the start of the tab row's text (the tabMargin is not included).
 type tabHit struct{ idx, x, w int }
 
-// syncSuffix is the "syncing…"/"synced 2m ago" text at the right end of the
-// tab bar, and tabBudget the columns left for the tabs themselves — shared by
-// renderList and tabHitTest so what is drawn and what is clickable can't drift.
-func (m Model) syncSuffix() string {
+// syncStatus is the sync text shown in the footer ("syncing…" / "synced 3m
+// ago"), amber once the last sync is over a day old. It used to share the tab
+// row, which squeezed both.
+func (m Model) syncStatus() string {
 	if m.syncing {
-		return "  " + m.sp.View() + styleSyncing.Render(" syncing…")
+		return m.sp.View() + styleSyncing.Render(" syncing…")
 	}
-	if !m.lastSynced.IsZero() {
-		return "  " + styleMeta.Render("synced "+humanize.TimeAgo(m.lastSynced))
+	if m.lastSynced.IsZero() {
+		return ""
 	}
-	return ""
+	txt := "synced " + humanize.TimeAgo(m.lastSynced)
+	if time.Since(m.lastSynced) > 24*time.Hour {
+		return styleSyncing.Render(txt)
+	}
+	return styleMeta.Render(txt)
 }
 
-func (m Model) tabBudget() int { return min(m.width, 130) - 4 - lipgloss.Width(m.syncSuffix()) }
+// tabBudget is the columns the "Accounts" label plus the tabs may use.
+func (m Model) tabBudget() int { return m.bodyW() - tabMargin - 1 }
 
-// tabBar draws the account tabs with ui.Tabs (active pill, others dimmed,
-// unread count after the name) and works out where each visible tab sits, by
-// finding its " label count " cell in the plain text — ui.Tabs only drops tabs
-// from the ends, so the visible ones are contiguous around the active tab.
+// tabBar draws the Accounts row — dim label (spacious tier), then ui.Tabs
+// (active pill, others dimmed, unread count after the name) — within w
+// columns and works out where each visible tab sits, by finding its
+// " label count " cell in the plain text. ui.Tabs only drops tabs from the
+// ends, so the visible ones are contiguous around the active tab.
 func (m Model) tabBar(w int) (string, []tabHit) {
 	if len(m.accounts) == 0 {
 		return "", nil
+	}
+	lw := m.rowLabelW()
+	label := ""
+	if lw > 0 {
+		label = styleMeta.Render(fmt.Sprintf("%-*s", lw, "Accounts"))
 	}
 	counts := make([]int, len(m.accounts))
 	for i := range m.accounts {
@@ -219,7 +330,7 @@ func (m Model) tabBar(w int) (string, []tabHit) {
 		}
 		counts[i] = m.unreadCounts[key]
 	}
-	bar := ui.Tabs(w, m.accounts, m.activeTab, counts)
+	bar := ui.Tabs(max(w-lw, 1), m.accounts, m.activeTab, counts)
 	plain := ansi.Strip(bar)
 	seg := func(i int) string {
 		if counts[i] > 0 {
@@ -227,11 +338,11 @@ func (m Model) tabBar(w int) (string, []tabHit) {
 		}
 		return " " + m.accounts[i] + " "
 	}
-	col := func(byteIdx int) int { return runewidth.StringWidth(plain[:byteIdx]) }
+	col := func(byteIdx int) int { return lw + runewidth.StringWidth(plain[:byteIdx]) }
 
 	at := strings.Index(plain, seg(m.activeTab))
 	if at < 0 {
-		return bar, nil
+		return label + bar, nil
 	}
 	hits := []tabHit{{m.activeTab, col(at), runewidth.StringWidth(seg(m.activeTab))}}
 	for end, j := at+len(seg(m.activeTab)), m.activeTab+1; j < len(m.accounts); j++ { // right neighbours
@@ -250,44 +361,39 @@ func (m Model) tabBar(w int) (string, []tabHit) {
 		start -= 1 + len(sg)
 		hits = append(hits, tabHit{j, col(start), runewidth.StringWidth(sg)})
 	}
-	return bar, hits
+	return label + bar, hits
 }
 
-// tabHitTest returns the account-tab index at column x on the tab bar row
-// (row 1: header is row 0), or -1 if the click didn't land on a tab.
+// tabHitTest returns the account-tab index at screen cell (x, y), or -1 if
+// the click didn't land on a tab.
 func (m Model) tabHitTest(x, y int) int {
-	if y != 1 || len(m.accounts) == 0 {
+	if y != m.chrome().tabsY || len(m.accounts) == 0 {
 		return -1
 	}
 	_, hits := m.tabBar(m.tabBudget())
 	for _, h := range hits {
-		if x >= h.x && x < h.x+h.w {
+		if x >= tabMargin+h.x && x < tabMargin+h.x+h.w {
 			return h.idx
 		}
 	}
 	return -1
 }
 
-// rowHitTest returns the message index at screen row y, or -1 if the click
-// landed on a group header, preview-only gap, or outside the list. Mirrors
-// buildListLinesWithMapping's line layout and renderList's scroll window
-// (start := cursorLine - listH + 1 once the cursor scrolls past view).
-func (m Model) rowHitTest(y int) int {
-	idx := y - m.listStartY()
-	if idx < 0 || len(m.msgs) == 0 {
+// rowHitTest returns the message index at screen cell (x, y), or -1 if the
+// click landed on a group header, a blank line, the preview panel or outside
+// the list. Mirrors buildListLinesWithMapping's line layout and renderList's
+// scroll window (see scrollStart).
+func (m Model) rowHitTest(x, y int) int {
+	g := m.geom()
+	idx := y - g.rowY0
+	if idx < 0 || idx >= g.rowsVisible || len(m.msgs) == 0 || m.loading {
 		return -1
 	}
-	w := min(m.width, 130)
-	_, cursorLine, lineToMsg := m.buildListLinesWithMapping(w)
-	listH := m.height - m.listStartY() - 2
-	if listH < 1 {
-		listH = 1
+	if g.wide && x >= g.leftW {
+		return -1
 	}
-	start := 0
-	if cursorLine >= listH {
-		start = cursorLine - listH + 1
-	}
-	lineIdx := start + idx
+	_, cursorLine, lineToMsg := m.buildListLinesWithMapping(g.w)
+	lineIdx := scrollStart(cursorLine, g.rowsVisible) + idx
 	if lineIdx >= len(lineToMsg) {
 		return -1
 	}
@@ -399,7 +505,7 @@ func rowDateW(group string) int {
 
 const (
 	fromW = 20
-	acctW = 10 // "● " + 8-column short name
+	acctW = 1 // just the account's colored dot; its name is in the preview panel
 )
 
 // rowIndent is the number of columns before the subject: gutter(2) + dot(1)
@@ -449,32 +555,38 @@ func formatPreview(msg *models.Message, width int, showAcct bool) string {
 // holes between the independently colored date/sender/account columns, and an
 // outer wrap would be clobbered by their inner resets.
 func formatListRow(msg *models.Message, width int, showAcct bool, state rowState, query string) string {
-	base, dot := styleRead, "○"
+	// Calm colors: at most three accents per row. The time is always dim, the
+	// sender keeps its stable color only while the message is unread, the
+	// account is a dot, and the subject is plain (bold when unread).
+	base, dotStyle, dot := lipgloss.NewStyle(), styleMeta, "○"
 	if !msg.Read {
-		base, dot = styleUnread, "●"
+		base, dotStyle, dot = styleUnread, styleUnread.Foreground(colorBlue), "●"
 	}
 	if state == rowSelected {
 		base = styleSelectedText
 	}
 	group := dateGroup(msg.Date)
-	dateStyled := coloredDate(padRunes(rowDate(msg.Date, group), rowDateW(group)), msg.Date)
+	dateStyled := styleMeta.Render(padRunes(rowDate(msg.Date, group), rowDateW(group)))
 
 	from := msg.From
 	if idx := strings.Index(from, "<"); idx > 0 {
 		from = strings.TrimSpace(from[:idx])
 	}
-	fromStyled := senderStyle(msg.From).Render(padRunes(truncRunes(from, fromW), fromW))
+	fromStyle := lipgloss.NewStyle()
+	if !msg.Read {
+		fromStyle = senderStyle(msg.From)
+	}
+	fromStyled := fromStyle.Render(padRunes(truncRunes(from, fromW), fromW))
 
 	acct := ""
 	if showAcct && msg.Account != "" {
-		name := padRunes(runeLimit(acctShort(msg.Account), acctW-2), acctW-2)
-		acct = acctStyle(msg.Account).Render("● ") + styleMeta.Render(name) + "  "
+		acct = acctStyle(msg.Account).Render("●") + "  "
 	}
 
 	subjectW := max(width-rowIndent(msg, showAcct), 10)
 	subject := highlightMatches(truncRunes(msg.Subject, subjectW), fuzzyMatchIndexes(query, msg.Subject), base)
 
-	content := base.Render(dot) + " " + dateStyled + "  " + fromStyled + "  " + acct + subject
+	content := dotStyle.Render(dot) + " " + dateStyled + "  " + fromStyled + "  " + acct + subject
 	return paintRow(width, state, content)
 }
 
@@ -579,35 +691,6 @@ func buildQuote(msg *models.Message) string {
 		quoted = append(quoted, "> "+l)
 	}
 	return header + strings.Join(quoted, "\n")
-}
-
-// smartDate returns a compact context-aware date string.
-func smartDate(t time.Time) string {
-	now := time.Now()
-	switch {
-	case sameDay(t, now):
-		return "Today   " + t.Format("15:04")
-	case t.After(now.AddDate(0, 0, -6)):
-		return t.Format("Mon     15:04")
-	case t.Year() == now.Year():
-		return t.Format("Jan 02  15:04")
-	default:
-		return t.Format("Jan 02   2006")
-	}
-}
-
-func coloredDate(s string, t time.Time) string {
-	now := time.Now()
-	switch {
-	case sameDay(t, now):
-		return styleToday.Render(s)
-	case t.After(now.AddDate(0, 0, -7)):
-		return styleDateWeek.Render(s)
-	case t.After(now.AddDate(0, 0, -30)):
-		return styleDateMonth.Render(s)
-	default:
-		return styleDateOld.Render(s)
-	}
 }
 
 // copyToClipboardCmd copies via OSC 52 (works over SSH/tmux) and pbcopy
