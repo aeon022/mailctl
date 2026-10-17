@@ -341,7 +341,7 @@ Restart Claude Desktop. The `mailctl` tools will appear automatically.
 | `inbox` | List recent inbox messages with sender, subject, and body preview |
 | `search_email` | Search across subject, sender, and body by keyword |
 | `email_thread` | Retrieve all messages in a thread matched by subject |
-| `send_email` | Send an email (body, to, subject; optional cc, bcc, account) |
+| `send_email` | Send an email (body, to, subject; optional cc, bcc, account). **Disabled by default:** without `MAILCTL_MCP_ALLOW_SEND=1` in the MCP server's environment it only saves a draft |
 | `draft_email` | Save a composed message to Apple Mail Drafts |
 | `sync_inbox` | Trigger a sync from Apple Mail into the local cache |
 
