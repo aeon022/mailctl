@@ -62,7 +62,7 @@ func (m Model) helpContent() string {
 		Section("Navigation").
 		Row("j / k", "move down / up").
 		Row("g / G", "jump to top / bottom").
-		Row("T", "next colour theme (saved for the whole suite)").
+		Row("T", "colour theme picker with live preview (saved for the whole suite)").
 		Row("pgdn/up", "page down / up").
 		Row("tab", "next account").
 		Row("s-tab", "previous account").

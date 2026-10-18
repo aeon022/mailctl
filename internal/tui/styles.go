@@ -123,7 +123,7 @@ var paletteCommands = []palette.Command{
 	{Name: "unread", Desc: "Toggle unread-only filter", Key: "u"},
 	{Name: "sync", Desc: "Sync", Key: "s"},
 	{Name: "search", Desc: "Search messages", Key: "/"},
-	{Name: "theme", Desc: "Next colour theme (saved for the whole suite)", Key: "T"},
+	{Name: "theme", Desc: "Colour theme picker with live preview (saved for the whole suite)", Key: "T"},
 	{Name: "help", Desc: "Show help", Key: "?"},
 	{Name: "quit", Desc: "Quit mailctl", Key: "q"},
 }
