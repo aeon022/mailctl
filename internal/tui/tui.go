@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"github.com/aeon022/missionctl-core/themepicker"
 	"time"
 
 	"charm.land/bubbles/v2/spinner"
@@ -58,9 +59,10 @@ type clipboardMsg struct{}
 // ── Model ─────────────────────────────────────────────────────────────────────
 
 type Model struct {
-	view   view
-	width  int
-	height int
+	themePicker themepicker.Picker // the "T" popup
+	view        view
+	width       int
+	height      int
 
 	// list
 	msgs         []models.Message // filtered (by searchQ) view of allMsgs
