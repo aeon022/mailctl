@@ -9,7 +9,7 @@ import (
 
 func TestAccountTabHitsAreExactlyWhatWasDrawn(t *testing.T) {
 	m := newTestModel(t)
-	m.accounts = []string{"Alle", "Abteilung83", "FH Burgenland", "Gerwin || Die Brücke", "Gmail"}
+	m.accounts = []string{"All", "Abteilung83", "FH Burgenland", "Gerwin || Die Brücke", "Gmail"}
 	m.unreadCounts = map[string]int{"": 1, "Gmail": 1}
 	for _, active := range []int{0, 2, 4} {
 		m.activeTab = active

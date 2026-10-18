@@ -14,7 +14,7 @@ import (
 func tabModel(t *testing.T, width, active int) Model {
 	t.Helper()
 	m := newTestModel(t, sample()...)
-	m.accounts = []string{"Alle", "Abteilung83", "FH Burgenland", "Gerwin || Die Brücke", "Gmail"}
+	m.accounts = []string{"All", "Abteilung83", "FH Burgenland", "Gerwin || Die Brücke", "Gmail"}
 	m.unreadCounts = map[string]int{"": 1, "Gmail": 2}
 	m.activeTab = active
 	m.width, m.height = width, 30
@@ -25,7 +25,7 @@ func TestTabBarUsesPillsWithCountsAndFitsTheBudget(t *testing.T) {
 	m := tabModel(t, 110, 0)
 	bar, hits := m.tabBar(m.tabBudget())
 	plain := ansi.Strip(bar)
-	if !strings.Contains(plain, " Alle 1 ") || !strings.Contains(plain, " Gmail 2 ") || strings.Contains(plain, "·") {
+	if !strings.Contains(plain, " All 1 ") || !strings.Contains(plain, " Gmail 2 ") || strings.Contains(plain, "·") {
 		t.Errorf("tabs show the unread count after the name: %q", plain)
 	}
 	if lipgloss.Width(bar) > m.tabBudget() {

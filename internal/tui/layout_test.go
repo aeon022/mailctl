@@ -32,7 +32,7 @@ func layoutModel(t *testing.T, w, h, n int, accounts bool) Model {
 	t.Helper()
 	m := newTestModel(t, layoutMsgs(n)...)
 	if accounts {
-		m.accounts = []string{"Alle", "Brücke", "Gmail"}
+		m.accounts = []string{"All", "Brücke", "Gmail"}
 		m.unreadCounts = map[string]int{"": 3, "Gmail": 2}
 	}
 	mi, _ := tuitest.Send(m, tuitest.Resize(w, h))
@@ -79,7 +79,7 @@ func TestHeightTiersSpaciousAndCompact(t *testing.T) {
 	}
 	cl := strings.Split(ansi.Strip(compact.renderList()), "\n")
 	sl := strings.Split(ansi.Strip(spacious.renderList()), "\n")
-	if strings.Contains(strings.Join(cl[:4], "\n"), "Accounts") || !strings.Contains(cl[1], "Alle") || !strings.HasPrefix(cl[2], "──") {
+	if strings.Contains(strings.Join(cl[:4], "\n"), "Accounts") || !strings.Contains(cl[1], "All") || !strings.HasPrefix(cl[2], "──") {
 		t.Errorf("compact: header, unlabeled tabs, divider:\n%s", strings.Join(cl[:4], "\n"))
 	}
 	if !strings.HasPrefix(sl[1], "──") || strings.TrimSpace(sl[2]) != "" || !strings.Contains(sl[3], "Accounts") || strings.TrimSpace(sl[4]) != "" {

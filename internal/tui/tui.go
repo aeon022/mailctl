@@ -86,7 +86,7 @@ type Model struct {
 	batchConfirmDelete bool            // "d" once arms it, "d" again executes — mirrors the single-message m.confirmID press-twice pattern
 
 	// tabs
-	accounts     []string // ["Alle", "iCloud", ...]
+	accounts     []string // ["All", "iCloud", ...]
 	activeTab    int      // 0 = Alle
 	unreadCounts map[string]int
 

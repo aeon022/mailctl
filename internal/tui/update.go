@@ -80,7 +80,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.allMsgs = msg.msgs
 		m.msgs = filterMsgs(m.allMsgs, m.searchQ)
 		if len(msg.accounts) > 0 {
-			m.accounts = append([]string{"Alle"}, msg.accounts...)
+			m.accounts = append([]string{"All"}, msg.accounts...)
 		}
 		if m.pendingAccountRestore != "" {
 			for i, a := range m.accounts {
@@ -107,7 +107,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = msg.err
 		} else {
 			if len(msg.accounts) > 0 {
-				m.accounts = append([]string{"Alle"}, msg.accounts...)
+				m.accounts = append([]string{"All"}, msg.accounts...)
 			}
 			m.setStatus(fmt.Sprintf("Synced %d messages", msg.count))
 			m.lastSynced = time.Now()
