@@ -233,6 +233,7 @@ mailctl license status
 | `enter` | Open message detail |
 | `n` | Compose new message |
 | `s` | Sync inbox from Apple Mail |
+| `T` | Next colour theme — switches live and is saved for the whole suite |
 | `u` | Toggle unread-only filter |
 | `/` | Search (subject, from, body) |
 | `tab` / `shift+tab` | Switch account |

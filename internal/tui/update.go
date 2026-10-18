@@ -13,6 +13,7 @@ import (
 	"github.com/aeon022/mailctl/internal/templates"
 	"github.com/aeon022/missionctl-core/lastsync"
 	"github.com/aeon022/missionctl-core/palette"
+	"github.com/aeon022/missionctl-core/theme"
 )
 
 // ── Init ──────────────────────────────────────────────────────────────────────
@@ -542,6 +543,13 @@ func (m Model) updateList(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.syncing = true
 			m.setStatus("Syncing…")
 			return m, tea.Batch(syncCmd(), m.sp.Tick)
+		}
+	case "T": // live theme switch; the choice is saved for every suite tool
+		name, err := theme.Cycle()
+		if err != nil {
+			m.setStatus("Theme: " + err.Error())
+		} else {
+			m.setStatus("Theme: " + name)
 		}
 	case "u":
 		m.unreadOnly = !m.unreadOnly

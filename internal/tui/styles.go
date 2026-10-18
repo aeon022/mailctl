@@ -37,46 +37,54 @@ func adaptiveColor(light, dark string) color.Color {
 }
 
 var (
-	// palette — shared across the suite via missionctl-core/theme.
-	colorBlue   = theme.BlueV2
-	colorGreen  = theme.GreenV2
-	colorRed    = theme.RedV2
-	colorMuted  = theme.MutedV2
-	colorSubtle = theme.SubtleV2
-	colorAmber  = theme.AmberV2
-	colorTabBg  = adaptiveColor("252", "235") // inactive tab bg
+	// Rebuilt by refreshStyles when the theme changes.
+	colorBlue, colorGreen, colorRed, colorMuted, colorSubtle, colorAmber, colorTabBg                                                                                      color.Color
+	styleTabActive, styleTabInact, styleDivider, styleUnread, styleSelected, styleHeader, styleSubject, styleMeta, styleLabel, styleHelp, styleErr, styleOK, styleSyncing lipgloss.Style
+)
 
+func init() {
+	refreshStyles()
+	theme.OnChange(refreshStyles)
+}
+
+// refreshStyles builds every cached colour and style from the active theme (live theme switching).
+func refreshStyles() {
+	// palette — shared across the suite via missionctl-core/theme.
+	colorBlue = theme.BlueV2
+	colorGreen = theme.GreenV2
+	colorRed = theme.RedV2
+	colorMuted = theme.MutedV2
+	colorSubtle = theme.SubtleV2
+	colorAmber = theme.AmberV2
+	colorTabBg = adaptiveColor("252", "235") // inactive tab bg
 	// tab bar
 	styleTabActive = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(theme.OnAccentV2).
-			Background(colorBlue).
-			Padding(0, 3)
+		Bold(true).
+		Foreground(theme.OnAccentV2).
+		Background(colorBlue).
+		Padding(0, 3)
 	styleTabInact = lipgloss.NewStyle().
-			Foreground(adaptiveColor("237", "252")).
-			Background(colorTabBg).
-			Padding(0, 3)
-
+		Foreground(adaptiveColor("237", "252")).
+		Background(colorTabBg).
+		Padding(0, 3)
 	// list
-	styleDivider  = lipgloss.NewStyle().Foreground(colorSubtle)
-	styleUnread   = lipgloss.NewStyle().Bold(true)
+	styleDivider = lipgloss.NewStyle().Foreground(colorSubtle)
+	styleUnread = lipgloss.NewStyle().Bold(true)
 	styleSelected = lipgloss.NewStyle().
-			Background(theme.SelectedBgV2).
-			Foreground(theme.SelectedFgV2).
-			Bold(true)
-
+		Background(theme.SelectedBgV2).
+		Foreground(theme.SelectedFgV2).
+		Bold(true)
 	// detail / compose
-	styleHeader  = lipgloss.NewStyle().Bold(true).Foreground(colorBlue)
+	styleHeader = lipgloss.NewStyle().Bold(true).Foreground(colorBlue)
 	styleSubject = lipgloss.NewStyle().Bold(true)
-	styleMeta    = lipgloss.NewStyle().Foreground(colorMuted)
-	styleLabel   = lipgloss.NewStyle().Foreground(colorBlue).Width(9)
-
+	styleMeta = lipgloss.NewStyle().Foreground(colorMuted)
+	styleLabel = lipgloss.NewStyle().Foreground(colorBlue).Width(9)
 	// status
-	styleHelp    = lipgloss.NewStyle().Foreground(colorMuted)
-	styleErr     = lipgloss.NewStyle().Foreground(colorRed)
-	styleOK      = lipgloss.NewStyle().Foreground(colorGreen)
+	styleHelp = lipgloss.NewStyle().Foreground(colorMuted)
+	styleErr = lipgloss.NewStyle().Foreground(colorRed)
+	styleOK = lipgloss.NewStyle().Foreground(colorGreen)
 	styleSyncing = lipgloss.NewStyle().Foreground(adaptiveColor("214", "220"))
-)
+}
 
 // senderPalette: 8 distinct colors, avoid red/green (used for status).
 // Pad sender name BEFORE applying color so ANSI codes don't break width math.
@@ -115,6 +123,7 @@ var paletteCommands = []palette.Command{
 	{Name: "unread", Desc: "Toggle unread-only filter", Key: "u"},
 	{Name: "sync", Desc: "Sync", Key: "s"},
 	{Name: "search", Desc: "Search messages", Key: "/"},
+	{Name: "theme", Desc: "Next colour theme (saved for the whole suite)", Key: "T"},
 	{Name: "help", Desc: "Show help", Key: "?"},
 	{Name: "quit", Desc: "Quit mailctl", Key: "q"},
 }

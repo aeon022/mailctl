@@ -226,7 +226,7 @@ func TestEmptyAndLoadingStates(t *testing.T) {
 		t.Errorf("a fresh model is loading:\n%s", out)
 	}
 	m.loading = false
-	if out := ansi.Strip(m.renderList()); !strings.Contains(out, "No messages") || !strings.Contains(out, "press s to sync") {
+	if out := ansi.Strip(m.renderList()); !strings.Contains(out, "Welcome to mailctl") || !strings.Contains(out, "s   sync your inbox") {
 		t.Errorf("empty list should show the emptystate hint:\n%s", out)
 	}
 }

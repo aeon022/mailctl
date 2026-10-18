@@ -58,6 +58,7 @@ func (m Model) helpContent() string {
 		Section("Navigation").
 		Row("j / k", "move down / up").
 		Row("g / G", "jump to top / bottom").
+		Row("T", "next colour theme (saved for the whole suite)").
 		Row("pgdn/up", "page down / up").
 		Row("tab", "next account").
 		Row("s-tab", "previous account").
@@ -209,7 +210,7 @@ func (m Model) renderList() string {
 	case m.loading:
 		b.WriteString(emptystate.Loading(w, g.bodyH, m.sp.View(), "Loading messages…") + "\n")
 	case len(m.msgs) == 0:
-		b.WriteString(emptystate.Render(w, g.bodyH, "✉", "No messages", "press s to sync") + "\n")
+		b.WriteString(emptystate.Render(w, g.bodyH, "✉", "Welcome to mailctl", mailOnboarding()) + "\n")
 	case g.wide:
 		b.WriteString(m.renderWideBody(g) + "\n")
 	default:
@@ -484,4 +485,14 @@ func (m Model) renderTemplatePicker() string {
 		rows[i] = " " + rows[i]
 	}
 	return ui.Panel(w, min(len(rows)+2, max(m.height-4, 5)), "Insert template", strings.Join(rows, "\n"), true)
+}
+
+// mailOnboarding is the first-run hint of an empty mailbox: what to try first.
+func mailOnboarding() string {
+	return strings.Join([]string{
+		"○  s   sync your inbox",
+		"○  n   write a message",
+		"○  :   command palette",
+		"○  T   pick a colour theme",
+	}, "\n")
 }
