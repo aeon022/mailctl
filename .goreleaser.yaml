@@ -5,6 +5,7 @@ project_name: mailctl
 before:
   hooks:
     - go mod tidy
+    - sh -c 'rm -rf completions && mkdir completions && for s in bash zsh fish; do go run . completion $s > completions/mailctl.$s; done'
 
 builds:
   - main: .
@@ -23,6 +24,10 @@ builds:
 archives:
   - formats: [tar.gz]
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE*
+      - README*
+      - completions/*
 
 checksum:
   name_template: checksums.txt
@@ -48,5 +53,8 @@ brews:
     description: "Email from your terminal - send and read email from Markdown files"
     install: |
       bin.install "mailctl"
+      bash_completion.install "completions/mailctl.bash" => "mailctl"
+      zsh_completion.install "completions/mailctl.zsh" => "_mailctl"
+      fish_completion.install "completions/mailctl.fish"
     test: |
       system "#{bin}/mailctl", "version"
