@@ -11,6 +11,14 @@ OS keyring, and a Linux-aware `mailctl doctor` check. See
 [Linux (Thunderbird)](#linux-thunderbird) below for setup and current
 limitations — this is fresh and actively being tested, feedback welcome.
 
+**Install**
+
+```bash
+brew install aeon022/tap/mailctl
+```
+
+Prebuilt binaries for macOS and Linux (arm64, amd64) are on the [Releases](https://github.com/aeon022/mailctl/releases) page. Questions: see [SUPPORT.md](SUPPORT.md).
+
 ---
 
 ## Quick Start
