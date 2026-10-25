@@ -73,3 +73,6 @@ echo ""
 echo "Next steps:"
 echo "  mailctl sync   # import your inbox (takes ~10s)"
 echo "  mailctl        # open TUI"
+
+# man pages (best effort): man mailctl
+mkdir -p "$HOME/.local/share/man/man1" && "${INSTALL_DIR:-$HOME/.local/bin}/mailctl" man "$HOME/.local/share/man/man1" >/dev/null 2>&1 || true
