@@ -289,70 +289,15 @@ end tell
 	return applescript.Run(script)
 }
 
-// SearchMessages searches all accounts for messages whose subject matches
-// query. Mail.app's AppleScript dictionary has no generic "search" command
-// (the previous "search every mailbox for ..." here was a syntax error,
-// -2741, on every invocation) — this uses the same "whose" filter FetchThread
-// already relies on. It's scoped to subject only, not sender or body: a
-// live "whose sender contains" scan measured ~86s against this account's
-// mail, "subject or sender" together exceeded 2 minutes, and "content
-// contains" (body) didn't finish in over 2 minutes before being killed —
-// all live-measured, not estimated. Subject-only stays around 6-7s, fast
-// enough for an interactive CLI command. The default (non---live) search
-// path already covers sender and body via the local cached full-text
-// search; --live is the "check something not yet synced" escape hatch, so
-// this tradeoff only affects that path.
+// SearchMessages matches query against subject, sender and summary in a
+// read-only copy of Mail's Envelope Index (see envelope.go) — no AppleScript.
 func SearchMessages(query string, count int) ([]models.Message, error) {
-	script := fmt.Sprintf(`
-tell application "Mail"
-	set output to ""
-	repeat with a in accounts
-		repeat with mbox in mailboxes of a
-			try
-				set msgs to (messages of mbox whose subject contains "%s")
-				set msgCount to count of msgs
-				if msgCount > %d then set msgCount to %d
-				repeat with i from 1 to msgCount
-					set m to item i of msgs
-%s				end repeat
-			end try
-		end repeat
-	end repeat
-	return output
-end tell
-`, applescript.EscapeLine(query), count, count, appleMsgDump)
-	out, err := applescript.Run(script)
-	if err != nil {
-		return nil, err
-	}
-	return parseMessages(out, ""), nil
+	return queryEnvelope("s.subject LIKE '%'||?||'%' OR a.address LIKE '%'||?||'%' OR a.comment LIKE '%'||?||'%' OR su.summary LIKE '%'||?||'%'", query, count)
 }
 
-// FetchThread returns all messages with a given subject (simple thread simulation).
+// FetchThread returns all messages whose subject contains subject (simple thread simulation), from the Envelope Index copy.
 func FetchThread(subject string, count int) ([]models.Message, error) {
-	script := fmt.Sprintf(`
-tell application "Mail"
-	set output to ""
-	repeat with a in accounts
-		repeat with mbox in mailboxes of a
-			try
-				set msgs to (messages of mbox whose subject contains "%s")
-				set msgCount to count of msgs
-				if msgCount > %d then set msgCount to %d
-				repeat with i from 1 to msgCount
-					set m to item i of msgs
-%s				end repeat
-			end try
-		end repeat
-	end repeat
-	return output
-end tell
-`, applescript.EscapeLine(subject), count, count, appleMsgDumpWithAccount)
-	out, err := applescript.Run(script)
-	if err != nil {
-		return nil, err
-	}
-	return parseMessages(out, ""), nil
+	return queryEnvelope("s.subject LIKE '%'||?||'%'", subject, count)
 }
 
 // ListAccounts returns all Apple Mail account names.
