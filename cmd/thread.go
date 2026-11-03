@@ -20,7 +20,11 @@ var threadCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		subject := args[0]
 
-		// try SQLite cache first
+		// Envelope Index copy first (all mailboxes, fast); the cache only knows inboxes.
+		if msgs, err := mail.FetchThread(subject, threadCount); err == nil && len(msgs) > 0 {
+			return printMessages(msgs)
+		}
+
 		s, err := store.New(config.DBPath(), config.Shared())
 		if err == nil {
 			defer s.Close()

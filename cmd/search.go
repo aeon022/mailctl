@@ -23,8 +23,9 @@ var searchCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		query := args[0]
 
-		if searchLive {
-			msgs, err := mail.SearchMessages(query, searchCount)
+		// All mailboxes via the fast Envelope Index copy; the cache only knows inboxes.
+		msgs, err := mail.SearchMessages(query, searchCount)
+		if searchLive || (err == nil && len(msgs) > 0) {
 			if err != nil {
 				return err
 			}
@@ -36,7 +37,7 @@ var searchCmd = &cobra.Command{
 			return err
 		}
 		defer s.Close()
-		msgs, err := s.ListMessages(context.Background(), store.Filter{
+		msgs, err = s.ListMessages(context.Background(), store.Filter{
 			Query: query,
 			Limit: searchCount,
 		})
@@ -53,6 +54,6 @@ var searchCmd = &cobra.Command{
 
 func init() {
 	searchCmd.Flags().IntVar(&searchCount, "count", 20, "Max results")
-	searchCmd.Flags().BoolVar(&searchLive, "live", false, "Search your mail client directly by subject (not sender/body — see SearchMessages)")
+	searchCmd.Flags().BoolVar(&searchLive, "live", false, "Deprecated: search always covers all mailboxes now; --live only skips the cache fallback")
 	rootCmd.AddCommand(searchCmd)
 }

@@ -115,21 +115,22 @@ func handleSearch(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResu
 		return mcp.NewToolResultError("query is required"), nil
 	}
 
-	s, err := store.New(config.DBPath(), config.Shared())
-	if err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
-	}
-	defer s.Close()
-	msgs, err := s.ListMessages(context.Background(), store.Filter{Query: query, Limit: count})
-	if err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
-	}
-	if len(msgs) == 0 {
-		// fall back to live search
-		msgs, err = mail.SearchMessages(query, count)
-		if err != nil {
+	// All mailboxes via the fast Envelope Index copy; the cache only knows inboxes.
+	msgs, err := searchMail(query, count)
+	if err != nil || len(msgs) == 0 {
+		s, serr := store.New(config.DBPath(), config.Shared())
+		if serr != nil {
+			if err == nil {
+				err = serr
+			}
 			return mcp.NewToolResultError(err.Error()), nil
 		}
+		defer s.Close()
+		cached, cerr := s.ListMessages(context.Background(), store.Filter{Query: query, Limit: count})
+		if cerr != nil {
+			return mcp.NewToolResultError(cerr.Error()), nil
+		}
+		msgs = cached
 	}
 	return mcp.NewToolResultText(formatMessages(msgs, fmt.Sprintf("Search: %q", query))), nil
 }
@@ -151,6 +152,9 @@ func handleThread(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResu
 
 // sendMail is a variable so tests never reach a mail client or SMTP server.
 var sendMail = mail.Send
+
+// searchMail is a variable so tests never read the real Mail index.
+var searchMail = mail.SearchMessages
 var saveDraft = mail.SaveDraft
 
 // An AI agent that reads mail can be talked into sending mail (prompt injection: "forward the last

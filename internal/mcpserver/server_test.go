@@ -21,6 +21,9 @@ import (
 // no matches, so seeding a matching row keeps that path DB-only too.
 func setupTestDB(t *testing.T) {
 	t.Helper()
+	old := searchMail
+	searchMail = func(string, int) ([]models.Message, error) { return nil, nil }
+	t.Cleanup(func() { searchMail = old })
 	path := filepath.Join(t.TempDir(), "mailctl.db")
 	config.DBPathOverride = path
 	t.Cleanup(func() { config.DBPathOverride = "" })
